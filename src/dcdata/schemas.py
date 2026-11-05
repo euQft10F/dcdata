@@ -95,7 +95,8 @@ MATCH_EXTRA_COLUMNS = [
 
 MATCHES_COLUMNS = AUCTIONS_COLUMNS + MATCH_EXTRA_COLUMNS
 
-JOINED_COLUMNS = DC_EVENTS_COLUMNS + [
+# Columns of matches.csv carried into credit_events_with_auctions.csv.
+JOINED_AUCTION_COLUMNS = [
     "auction_id",
     "auction_date",
     "legal_name",
@@ -107,8 +108,8 @@ JOINED_COLUMNS = DC_EVENTS_COLUMNS + [
     "match_method",
     "match_score",
     "needs_review",
-    "latest_decision_date",
-    "final_list_pdf_path",
 ]
+
+JOINED_COLUMNS = DC_EVENTS_COLUMNS + JOINED_AUCTION_COLUMNS + ["latest_decision_date", "final_list_pdf_path"]
 
 MATCH_METHODS = ("exact_link", "normalized_link", "document_link", "fuzzy", "unmatched")

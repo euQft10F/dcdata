@@ -101,7 +101,7 @@ def run_dc(
         "n_target_links": sum(1 for lk in links if lk["is_target"]),
         "detail_status": dict(sorted(Counter(e["detail_fetch_status"] for e in events).items())),
         "doc_types": dict(sorted(Counter(lk["doc_type"] for lk in links).items())),
-        "download_status": dict(sorted(Counter(lk.get("download_status", "") for lk in links).items())),
+        "download_status": dict(sorted(Counter(lk["download_status"] for lk in links).items())),
         "md_status": dict(
             sorted(Counter(lk.get("md_status", "") for lk in links if lk.get("md_status")).items())
         ),

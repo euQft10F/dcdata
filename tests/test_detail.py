@@ -1,11 +1,9 @@
-from pathlib import Path
-
 import pytest
+from conftest import FIXTURES
 
 from dcdata import schemas
 from dcdata.dc.detail import parse_procedural_history
 
-FIXTURES = Path(__file__).parent / "fixtures"
 LINK_KEYS = [
     "dc_id",
     "entry_seq",

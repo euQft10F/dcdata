@@ -1,11 +1,11 @@
 import json
 import re
-from pathlib import Path
 from urllib.parse import unquote
 
 import httpx
 import pytest
 import respx
+from conftest import FIXTURES
 
 from dcdata import config, csvio, schemas
 from dcdata.auctions.api import CreditFixingsAPI, safe_key
@@ -13,13 +13,12 @@ from dcdata.auctions.pipeline import run_auctions
 from dcdata.config import Settings
 from dcdata.http import Fetcher
 
-FIX = Path(__file__).parent / "fixtures"
 API = config.CF_API
 FIXTURE_RESULTS = {"NFEFIN", "NRAMC"}
 
 
 def _load(name):
-    return json.loads((FIX / name).read_text(encoding="utf-8"))
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
 class FakeAPI:
@@ -75,7 +74,7 @@ def _rows(s):
 
 def _year_counts():
     cds = lcds = 0
-    for f in FIX.glob("cf_year_*.json"):
+    for f in FIXTURES.glob("cf_year_*.json"):
         for a in json.loads(f.read_text(encoding="utf-8")):
             if a["auctionType"] == "LCDS":
                 lcds += 1
@@ -96,10 +95,11 @@ def test_api_headers_and_cache_keys(tmp_path):
     assert api.years()[0] == 2026
     assert len(api.by_year(2026)) == len(_load("cf_year_2026.json"))
     assert (
-        api.results_by_ticker("NFEFIN")["auctionDetailsMap"]["9183"]["stateParams"]["Final Price"] == "26.625"
+        api.results_by_ticker("NFEFIN")[0]["auctionDetailsMap"]["9183"]["stateParams"]["Final Price"]
+        == "26.625"
     )
     api.results_by_ticker(" MONTE")
-    assert api.details_by_id(9183)["stateParams"]["Final Price"] == "50.0"
+    assert api.details_by_id(9183)[0]["stateParams"]["Final Price"] == "50.0"
     req = respx.calls[0].request
     assert req.headers["Origin"] == config.CF_ORIGIN
     assert req.headers["Accept"] == "application/json"
@@ -123,8 +123,7 @@ def test_api_errors(tmp_path):
     api = CreditFixingsAPI(Fetcher(delay=0))
     with pytest.raises(RuntimeError):
         api.years()
-    assert api.results_by_ticker("X") is None
-    assert api.status_of(api.results_url("X")) == 404
+    assert api.results_by_ticker("X") == (None, 404)
 
 
 @respx.mock

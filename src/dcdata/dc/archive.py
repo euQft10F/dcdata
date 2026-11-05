@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 from .. import config, urls
 from ..http import Fetcher
+from ..util import clean_text
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +19,6 @@ PAGE_SIZE = 500
 N_COLUMNS = 8
 CATEGORY_COLUMN = 2
 
-_WS = re.compile(r"\s+")
 _FURTHER_INFO_LABEL = re.compile(r"^further information provided by question submitter\s*:?\s*", re.I)
 _QUESTION_PREFIX = re.compile(r"^question\s*:\s*", re.I)
 
@@ -29,10 +29,6 @@ _META_LABELS = {
     "committee": "committee",
     "coverage election": "coverage_election",
 }
-
-
-def _clean(text: str | None) -> str:
-    return _WS.sub(" ", text or "").strip()
 
 
 def build_archive_form(category: str, start: int, length: int) -> list[tuple[str, str]]:
@@ -96,7 +92,7 @@ def fetch_archive(fetcher: Fetcher, category: str = "credit-event", refresh: boo
             kept.append(row)
         else:
             log.warning("Dropping archive row with unexpected category: %r", row[:4])
-    if total is not None and len(rows) != total:
+    if len(rows) != total:
         log.warning("DC archive: collected %d rows but server reported %d", len(rows), total)
     return kept
 
@@ -114,7 +110,7 @@ def epoch_to_date(value) -> str:
 
 def _text_date(text: str) -> str:
     try:
-        return datetime.strptime(_clean(text), "%B %d, %Y").date().isoformat()
+        return datetime.strptime(clean_text(text), "%B %d, %Y").date().isoformat()
     except ValueError:
         return ""
 
@@ -146,17 +142,17 @@ def _parse_html_block(block: str) -> dict:
 
     title = soup.select_one("h2.credit-title")
     if title:
-        out["question"] = _QUESTION_PREFIX.sub("", _clean(title.get_text(" ", strip=True)))
+        out["question"] = _QUESTION_PREFIX.sub("", clean_text(title.get_text(" ", strip=True)))
 
     tt = soup.select_one("p.ceMeta_2 strong")
     if tt:
-        out["transaction_type"] = _clean(tt.get_text(" ", strip=True))
+        out["transaction_type"] = clean_text(tt.get_text(" ", strip=True))
 
     for li in soup.select("ul.ceMeta_3 li"):
         em = li.find("em")
         if not em:
             continue
-        label = _clean(em.get_text(" ", strip=True)).rstrip(":").strip().lower()
+        label = clean_text(em.get_text(" ", strip=True)).rstrip(":").strip().lower()
         col = _META_LABELS.get(label)
         if not col:
             continue
@@ -164,9 +160,9 @@ def _parse_html_block(block: str) -> dict:
         if strong:
             value = strong.get_text(" ", strip=True)
         else:
-            full = _clean(li.get_text(" ", strip=True))
-            value = full[len(_clean(em.get_text(" ", strip=True))) :]
-        out[col] = _clean(value)
+            full = clean_text(li.get_text(" ", strip=True))
+            value = full[len(clean_text(em.get_text(" ", strip=True))) :]
+        out[col] = clean_text(value)
 
     more = soup.select_one("a.more-link[href]")
     if more:
@@ -176,7 +172,7 @@ def _parse_html_block(block: str) -> dict:
 
     content = soup.select_one("div.entry-content")
     if content:
-        text = _clean(content.get_text(" ", strip=True))
+        text = clean_text(content.get_text(" ", strip=True))
         out["further_information"] = _FURTHER_INFO_LABEL.sub("", text).strip()
     return out
 
@@ -187,20 +183,12 @@ def parse_archive_row(row: list) -> dict:
     cells = list(row) + [""] * (N_COLUMNS - len(row))
     html = _parse_html_block(str(cells[7] or ""))
     return {
-        "dc_id": html["dc_id"],
-        "dc_url": html["dc_url"],
-        "reference_entity": _clean(str(cells[3] or "")),
+        **html,
+        "reference_entity": clean_text(str(cells[3] or "")),
         "committee_code": str(cells[1] or ""),
-        "committee": html["committee"],
         "category": str(cells[2] or ""),
         "date_updated": _parse_date_updated(cells[0]),
         "submitted_date": epoch_to_date(cells[4]),
-        "status": _clean(str(cells[5] or "")),
-        "outcome": _clean(str(cells[6] or "")),
-        "question": html["question"],
-        "transaction_type": html["transaction_type"],
-        "issue_number": html["issue_number"],
-        "submitted_by": html["submitted_by"],
-        "coverage_election": html["coverage_election"],
-        "further_information": html["further_information"],
+        "status": clean_text(str(cells[5] or "")),
+        "outcome": clean_text(str(cells[6] or "")),
     }

@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from .util import write_atomic
+
 log = logging.getLogger(__name__)
 
 MIN_TEXT_CHARS = 20
@@ -41,10 +43,7 @@ def pdf_to_markdown(pdf_path: Path, md_path: Path, refresh: bool = False) -> str
         if not isinstance(text, str):  # page_chunks or similar would give a list
             raise TypeError(f"unexpected to_markdown result {type(text).__name__}")
         text = text.replace("\r\n", "\n").replace("\r", "\n")
-        md_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = md_path.with_name(md_path.name + ".part")
-        tmp.write_bytes(text.encode("utf-8"))
-        tmp.replace(md_path)
+        write_atomic(md_path, text.encode("utf-8"))
     except Exception as e:  # noqa: BLE001 - any conversion failure is recorded, never fatal
         status = f"error:{type(e).__name__}"
         log.warning("markdown %s -> %s", pdf_path, status)

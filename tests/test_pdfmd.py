@@ -1,17 +1,8 @@
 import os
 
-import pymupdf
+from conftest import make_pdf
 
 from dcdata.pdfmd import pdf_to_markdown
-
-
-def make_pdf(path, text=None):
-    doc = pymupdf.open()
-    page = doc.new_page()
-    if text:
-        page.insert_text((72, 72), text, fontsize=12)
-    doc.save(str(path))
-    doc.close()
 
 
 def test_pdf_with_text(tmp_path):

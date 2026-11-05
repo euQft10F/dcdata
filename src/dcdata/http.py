@@ -8,19 +8,15 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
+from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from . import config
+from .util import write_atomic
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +34,6 @@ class FetchResult:
     status: int
     final_url: str
     content: bytes
-    headers: dict[str, str] = field(default_factory=dict)
     from_cache: bool = False
 
     @property
@@ -65,8 +60,13 @@ class Fetcher:
     ):
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.delay = delay
-        self.max_retries = max_retries
         self._last_request: dict[str, float] = {}
+        self._retrying = Retrying(
+            reraise=True,
+            stop=stop_after_attempt(max_retries + 1),
+            wait=wait_exponential(multiplier=2, min=2, max=30),
+            retry=retry_if_exception_type((httpx.TransportError, _RetryableStatus)),
+        )
         self.client = client or httpx.Client(
             headers={"User-Agent": user_agent},
             follow_redirects=True,
@@ -122,7 +122,6 @@ class Fetcher:
             status=m["status"],
             final_url=m["final_url"],
             content=body.read_bytes(),
-            headers={"content-type": m.get("content_type", "")},
             from_cache=True,
         )
 
@@ -130,22 +129,8 @@ class Fetcher:
         if not self.cache_dir:
             return
         body, meta = self._cache_paths(cache_key)
-        body.parent.mkdir(parents=True, exist_ok=True)
-        tmp = body.with_name(body.name + ".part")
-        tmp.write_bytes(res.content)
-        tmp.replace(body)
-        meta.write_text(
-            json.dumps(
-                {
-                    "status": res.status,
-                    "final_url": res.final_url,
-                    "content_type": res.headers.get("content-type", ""),
-                },
-                indent=2,
-                sort_keys=True,
-            ),
-            encoding="utf-8",
-        )
+        write_atomic(body, res.content)
+        write_atomic(meta, json.dumps({"status": res.status, "final_url": res.final_url}, indent=2).encode())
 
     def _throttle(self, url: str) -> None:
         host = urlsplit(url).netloc.lower()
@@ -156,37 +141,26 @@ class Fetcher:
                 time.sleep(wait)
         self._last_request[host] = time.monotonic()
 
+    def _send(self, method, url, data, headers) -> httpx.Response:
+        self._throttle(url)
+        self.n_network_requests += 1
+        log.debug("%s %s", method, url)
+        resp = self.client.request(method, url, data=data, headers=headers)
+        if resp.status_code in RETRY_STATUSES:
+            raise _RetryableStatus(resp)
+        return resp
+
     def _fetch(self, method, url, *, data=None, cache_key=None, refresh=False, headers=None):
         if cache_key and not refresh:
             cached = self._read_cache(cache_key)
             if cached is not None:
                 return cached
 
-        @retry(
-            reraise=True,
-            stop=stop_after_attempt(self.max_retries + 1),
-            wait=wait_exponential(multiplier=2, min=2, max=30),
-            retry=retry_if_exception_type((httpx.TransportError, _RetryableStatus)),
-        )
-        def do() -> httpx.Response:
-            self._throttle(url)
-            self.n_network_requests += 1
-            log.debug("%s %s", method, url)
-            resp = self.client.request(method, url, data=data, headers=headers)
-            if resp.status_code in RETRY_STATUSES:
-                raise _RetryableStatus(resp)
-            return resp
-
         try:
-            resp = do()
+            resp = self._retrying(self._send, method, url, data, headers)
         except _RetryableStatus as e:  # retries exhausted: report the status, do not raise
             resp = e.response
-        res = FetchResult(
-            status=resp.status_code,
-            final_url=str(resp.url),
-            content=resp.content,
-            headers={k.lower(): v for k, v in resp.headers.items()},
-        )
+        res = FetchResult(status=resp.status_code, final_url=str(resp.url), content=resp.content)
         # Only cache successful responses so transient failures are retried next run.
         if cache_key and res.ok:
             self._write_cache(cache_key, res)

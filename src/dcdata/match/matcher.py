@@ -16,18 +16,18 @@ import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date
-from urllib.parse import urlsplit, urlunsplit
 
 from rapidfuzz import fuzz
 
+from .. import config
+from ..csvio import fmt_value
 from ..schemas import AUCTIONS_COLUMNS, MATCHES_COLUMNS
-from ..urls import normalize_dc_url, normalize_url, quote_href
+from ..urls import dc_path_repaired, dc_url_key, doc_url_key
 from .normalize import normalize_name
 
 log = logging.getLogger(__name__)
 
 DECIDED = "Question Decided"
-REVIEW_MARGIN = 3.0
 
 
 @dataclass(frozen=True)
@@ -60,26 +60,6 @@ def _parse_date(s: str | None) -> date | None:
         return None
 
 
-def _url_key(url: str) -> str:
-    """Comparison key for DC detail URLs: normalised, lowercased."""
-    return normalize_dc_url(url).lower()
-
-
-def _doc_key(url: str) -> str:
-    """Comparison key for document URLs: normalize_url, case- and trailing-slash-insensitive path."""
-    parts = urlsplit(normalize_url(url))
-    path = parts.path.lower().rstrip("/")
-    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
-
-
-def _link_was_canonical(isda_link: str) -> bool:
-    """True when normalize_dc_url did not need to repair the path (only case/slash/scheme)."""
-    raw_path = urlsplit(quote_href(isda_link)).path.lower()
-    if not raw_path.endswith("/"):
-        raw_path += "/"
-    return raw_path == urlsplit(normalize_dc_url(isda_link)).path.lower()
-
-
 class _EventIndex:
     """Precomputed lookups over the DC events table."""
 
@@ -92,7 +72,7 @@ class _EventIndex:
                 continue
             self.by_id[dc_id] = ev
             if ev.get("dc_url"):
-                self.by_url.setdefault(_url_key(ev["dc_url"]), ev)
+                self.by_url.setdefault(dc_url_key(ev["dc_url"]), ev)
         self.names = {
             dc_id: normalize_name(ev.get("reference_entity", "")) for dc_id, ev in self.by_id.items()
         }
@@ -100,10 +80,9 @@ class _EventIndex:
         self.decided = {dc_id: ev.get("outcome", "") == DECIDED for dc_id, ev in self.by_id.items()}
         self.docs: dict[str, set[str]] = {}
         for doc in documents:
-            url = doc.get("url_normalized") or doc.get("url") or ""
-            dc_id = doc.get("dc_id", "")
+            url, dc_id = doc["url_normalized"], doc["dc_id"]
             if url and dc_id in self.by_id:
-                self.docs.setdefault(_doc_key(url), set()).add(dc_id)
+                self.docs.setdefault(doc_url_key(url), set()).add(dc_id)
 
 
 def _auction_names(auction: dict) -> list[str]:
@@ -165,8 +144,7 @@ def _fill_event(row: dict, ev: dict) -> None:
 
 
 def _fmt_score(score: float) -> str:
-    r = round(score, 1)
-    return str(int(r)) if float(r).is_integer() else str(r)
+    return fmt_value(round(float(score), 1))
 
 
 def _fill_ranked(row: dict, ranked: list[Candidate]) -> None:
@@ -174,14 +152,6 @@ def _fill_ranked(row: dict, ranked: list[Candidate]) -> None:
     if len(ranked) > 1:
         row["runner_up_dc_id"] = ranked[1].dc_id
         row["runner_up_score"] = _fmt_score(ranked[1].score)
-
-
-def _needs_review(ranked: list[Candidate]) -> bool:
-    if len(ranked) < 2:
-        return False
-    best, runner = ranked[0], ranked[1]
-    close = best.score - runner.score <= REVIEW_MARGIN and best.decided == runner.decided
-    return close or len(ranked) > 1
 
 
 def _sort_key(row: dict) -> tuple:
@@ -206,17 +176,17 @@ def match_one(
 
     # 1/2. detail-page link
     if link:
-        ev = index.by_url.get(_url_key(link))
+        ev = index.by_url.get(dc_url_key(link))
         if ev is not None:
             _fill_event(row, ev)
-            row["match_method"] = "exact_link" if _link_was_canonical(link) else "normalized_link"
+            row["match_method"] = "normalized_link" if dc_path_repaired(link) else "exact_link"
             row["match_score"] = "100"
             row["n_candidates"] = "1"
             return row
 
     # 3. document link
     if link:
-        dc_ids = index.docs.get(_doc_key(link))
+        dc_ids = index.docs.get(doc_url_key(link))
         if dc_ids:
             if len(dc_ids) == 1:
                 ranked = [Candidate(next(iter(dc_ids)), 100.0, None, False)]
@@ -236,7 +206,8 @@ def match_one(
         row["match_method"] = "fuzzy"
         row["match_score"] = _fmt_score(best.score)
         _fill_ranked(row, ranked)
-        row["needs_review"] = "true" if _needs_review(ranked) else "false"
+        # A close runner-up always implies a second candidate, so "more than one" is the whole rule.
+        row["needs_review"] = "true" if len(ranked) > 1 else "false"
         return row
 
     # 5. unmatched
@@ -249,14 +220,13 @@ def match_auctions(
     auctions: list[dict],
     events: list[dict],
     documents: list[dict],
-    scorer: str = "token_sort_ratio",
-    threshold: float = 80.0,
-    date_window: tuple[int, int] = (-7, 365),
+    scorer: str = config.FUZZY_SCORER,
+    threshold: float = config.FUZZY_THRESHOLD,
+    date_window: tuple[int, int] = config.DATE_WINDOW_DAYS,
 ) -> list[dict]:
     """One dict per auction with schemas.MATCHES_COLUMNS."""
     scorer_fn = get_scorer(scorer)
     index = _EventIndex(events, documents)
-    window = (int(date_window[0]), int(date_window[1]))
-    rows = [match_one(a, index, scorer_fn, float(threshold), window) for a in auctions]
+    rows = [match_one(a, index, scorer_fn, threshold, date_window) for a in auctions]
     rows.sort(key=_sort_key)
     return rows

@@ -9,7 +9,13 @@ from pathlib import Path
 
 from ..config import Settings
 from ..csvio import read_csv, write_csv
-from ..schemas import DC_EVENTS_COLUMNS, JOINED_COLUMNS, MATCH_METHODS, MATCHES_COLUMNS
+from ..schemas import (
+    DC_EVENTS_COLUMNS,
+    JOINED_AUCTION_COLUMNS,
+    JOINED_COLUMNS,
+    MATCH_METHODS,
+    MATCHES_COLUMNS,
+)
 from .evaluate import evaluate_grid, format_table
 from .matcher import match_auctions
 
@@ -22,20 +28,6 @@ MATCHES_CSV = "matches.csv"
 JOINED_CSV = "credit_events_with_auctions.csv"
 
 _PRODUCER = {AUCTIONS_CSV: "dcdata auctions", EVENTS_CSV: "dcdata dc", DOCUMENTS_CSV: "dcdata dc"}
-
-_AUCTION_JOIN_COLUMNS = [
-    "auction_id",
-    "auction_date",
-    "legal_name",
-    "ticker",
-    "tier",
-    "ccy",
-    "final_price",
-    "results_url",
-    "match_method",
-    "match_score",
-    "needs_review",
-]
 
 
 def _read_input(path: Path) -> list[dict]:
@@ -110,7 +102,7 @@ def build_joined(events: list[dict], matches: list[dict], documents: list[dict])
         auctions = by_dc.get(dc_id) or [None]
         for m in auctions:
             row = dict(base)
-            for c in _AUCTION_JOIN_COLUMNS:
+            for c in JOINED_AUCTION_COLUMNS:
                 row[c] = m.get(c, "") if m is not None else ""
             rows.append(row)
 
@@ -130,12 +122,12 @@ def build_joined(events: list[dict], matches: list[dict], documents: list[dict])
 
 
 def run_match(settings: Settings, evaluate: bool = False) -> dict:
-    out_dir = Path(settings.output_dir)
+    out_dir = settings.output_dir
     auctions = _read_input(out_dir / AUCTIONS_CSV)
     events = _read_input(out_dir / EVENTS_CSV)
     documents = _read_input(out_dir / DOCUMENTS_CSV)
     log.info("match: %d auctions, %d DC events, %d DC documents", len(auctions), len(events), len(documents))
-    window = tuple(settings.date_window_days)
+    window = settings.date_window_days
     matches = match_auctions(
         auctions,
         events,
@@ -168,7 +160,7 @@ def run_match(settings: Settings, evaluate: bool = False) -> dict:
         summary["n_needs_review"],
     )
     if evaluate:
-        n_truth, grid = evaluate_grid(auctions, events, documents, date_window=window)
+        n_truth, grid = evaluate_grid(auctions, events, documents, matches, date_window=window)
         table = format_table(n_truth, grid)
         print(table)
         log.info("evaluation:\n%s", table)

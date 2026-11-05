@@ -14,6 +14,7 @@ from pathlib import Path
 from . import __version__, config
 from .config import Settings
 from .http import Fetcher
+from .match.evaluate import SCORERS
 
 log = logging.getLogger("dcdata")
 
@@ -73,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     m_opts.add_argument(
         "--scorer",
         default=config.FUZZY_SCORER,
-        choices=["ratio", "partial_ratio", "token_sort_ratio", "token_set_ratio", "WRatio"],
+        choices=SCORERS,
         help="RapidFuzz scorer for the fuzzy fallback (default: token_sort_ratio)",
     )
     m_opts.add_argument(

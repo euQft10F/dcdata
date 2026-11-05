@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Collection
 from datetime import date
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
+
+from ..urls import url_filename
 
 # Ordered rules, first match wins (PLAN.md section 5.B, with two documented refinements).
 #
@@ -57,15 +59,9 @@ _GENERIC_TEXTS = {
 _PDF_PATH_RE = re.compile(r"\.pdf(?:/|$)", re.IGNORECASE)
 
 
-def _url_filename(url: str) -> str:
-    """Last non-empty path segment of ``url``, unquoted ('' if none)."""
-    segments = [s for s in urlsplit(url.strip()).path.split("/") if s]
-    return unquote(segments[-1]) if segments else ""
-
-
 def _filename_words(url: str) -> str:
     """URL filename as words: unquoted, '-'/'_' -> spaces, extension stripped."""
-    name = _url_filename(url)
+    name = url_filename(url)
     name = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", name)
     return re.sub(r"[-_]+", " ", name)
 
@@ -191,7 +187,7 @@ def _text_date(text: str) -> date | None:
 
 
 def _filename_date(url: str) -> date | None:
-    raw = _url_filename(url)
+    raw = url_filename(url)
     # Numeric dashed dates in filenames ("decision-08-10-26") are ambiguous (MM-DD vs DD-MM) and
     # are not parsed; named months ("dc-decision-17-may-2023") and compact forms are.
     return _compact_dates(raw) or _named_dates(_filename_words(url))
@@ -203,15 +199,14 @@ def extract_doc_date(text: str, url: str) -> str:
     return d.isoformat() if d else ""
 
 
-def annotate_link(link: dict, target_types: Iterable[str]) -> dict:
+def annotate_link(link: dict, target_types: Collection[str]) -> dict:
     """Return a copy of ``link`` with doc_type, is_target, doc_issue_number, doc_date added."""
-    targets = set(target_types)
-    text = link.get("link_text") or ""
-    url = link.get("url_normalized") or link.get("url") or ""
+    text = link["link_text"]
+    url = link["url_normalized"]
     doc_type = classify_link(text, url)
     out = dict(link)
     out["doc_type"] = doc_type
-    out["is_target"] = doc_type in targets
+    out["is_target"] = doc_type in target_types
     out["doc_issue_number"] = extract_issue_number(text)
     out["doc_date"] = extract_doc_date(text, url)
     return out

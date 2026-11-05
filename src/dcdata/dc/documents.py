@@ -7,31 +7,31 @@ import json
 import logging
 import re
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
 
 import httpx
 
-from .. import urls
+from .. import schemas, urls
 from ..http import Fetcher
 from ..pdfmd import pdf_to_markdown
+from ..util import write_atomic
 
 log = logging.getLogger(__name__)
 
 PDF_MAGIC = b"%PDF-"
 _UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]")
 _MAX_BASENAME = 120
-# Sidecar next to each PDF that remembers the post-redirect URL, so a rerun that reuses the file
-# on disk reports the same final_url as the run that downloaded it (byte-identical CSVs).
+# Sidecar next to each destination PDF recording the download outcome (final_url, status, sha256,
+# size). A rerun reuses it instead of re-hashing the PDF, and does not re-request links that failed
+# permanently (404/410/not_pdf), so reruns are fast and report byte-identical rows.
 _META_SUFFIX = ".meta.json"
+_PERMANENT_FAILURES = {"http_404", "http_410", "not_pdf"}
 
-_DOWNLOAD_FIELDS = ("download_status", "final_url", "sha256", "size_bytes", "pdf_path")
+_DOWNLOAD_FIELDS = tuple(c for c in schemas.DC_DOWNLOAD_COLUMNS if c not in ("md_path", "md_status"))
 
 
 def safe_basename(url: str) -> str:
     """Last non-empty URL path segment, unquoted, '.pdf' stripped, unsafe chars -> '_', <=120 chars."""
-    segments = [s for s in urlsplit(url).path.split("/") if s]
-    name = unquote(segments[-1]) if segments else ""
-    name = re.sub(r"\.pdf$", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\.pdf$", "", urls.url_filename(url), flags=re.IGNORECASE)
     name = _UNSAFE_RE.sub("_", name)[:_MAX_BASENAME]
     return name or "document"
 
@@ -52,68 +52,71 @@ def _from_rel(path_str: str, base_dir: Path | None) -> Path:
     return (Path(base_dir) if base_dir is not None else Path.cwd()) / p
 
 
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def _write_atomic(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".part")
-    tmp.write_bytes(data)
-    tmp.replace(path)
-
-
 def _meta_path(pdf: Path) -> Path:
     return pdf.with_name(pdf.name + _META_SUFFIX)
 
 
-def _read_meta_final_url(pdf: Path) -> str:
+def _read_meta(pdf: Path) -> dict:
     try:
-        return str(json.loads(_meta_path(pdf).read_text(encoding="utf-8")).get("final_url", ""))
+        return json.loads(_meta_path(pdf).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return ""
+        return {}
+
+
+def _outcome(status: str, final_url: str = "", data: bytes | None = None, pdf_path: str = "") -> dict:
+    out = dict.fromkeys(_DOWNLOAD_FIELDS, "")
+    out.update(download_status=status, final_url=final_url)
+    if data is not None:
+        out.update(sha256=hashlib.sha256(data).hexdigest(), size_bytes=len(data), pdf_path=pdf_path)
+    return out
+
+
+def _write_meta(dest: Path, url: str, out: dict) -> None:
+    meta = {k: out[k] for k in ("download_status", "final_url", "sha256", "size_bytes")}
+    write_atomic(_meta_path(dest), json.dumps({**meta, "url": url}, sort_keys=True).encode())
+
+
+def _from_meta(dest: Path, url: str, pdf_path: str) -> dict | None:
+    """Outcome recorded by an earlier run, or None if the link must be (re)fetched."""
+    meta = _read_meta(dest)
+    status = meta.get("download_status")
+    if status in _PERMANENT_FAILURES:
+        return _outcome(status, meta.get("final_url", ""))
+    if not dest.exists():
+        return None
+    if status == "ok" and meta.get("sha256") and meta.get("size_bytes") == dest.stat().st_size:
+        out = _outcome("ok", meta.get("final_url", ""))
+        out.update(sha256=meta["sha256"], size_bytes=meta["size_bytes"], pdf_path=pdf_path)
+        return out
+    # PDF without a complete sidecar (older run, or the PDF changed): hash it once and record that.
+    out = _outcome("ok", meta.get("final_url", ""), dest.read_bytes(), pdf_path)
+    _write_meta(dest, url, out)
+    return out
 
 
 def _download_one(fetcher: Fetcher, url: str, dest: Path, pdf_path: str, refresh: bool) -> dict:
-    empty = {"download_status": "", "final_url": "", "sha256": "", "size_bytes": "", "pdf_path": ""}
-    if dest.exists() and not refresh:
-        data = dest.read_bytes()
-        log.debug("reuse %s", pdf_path)
-        return {
-            "download_status": "ok",
-            "final_url": _read_meta_final_url(dest),
-            "sha256": _sha256(data),
-            "size_bytes": len(data),
-            "pdf_path": pdf_path,
-        }
+    if not refresh and (cached := _from_meta(dest, url, pdf_path)) is not None:
+        log.debug("reuse %s -> %s", url, cached["download_status"])
+        return cached
     try:
         res = fetcher.get(url)
     except (httpx.HTTPError, httpx.InvalidURL, OSError, ValueError) as e:
-        status = f"error:{type(e).__name__}"
-        log.info("download %s -> %s", url, status)
-        return {**empty, "download_status": status}
-    if not res.ok:
-        status = f"http_{res.status}"
-        log.info("download %s -> %s", url, status)
-        return {**empty, "download_status": status, "final_url": res.final_url}
-    if res.content[:5] != PDF_MAGIC:
-        log.info("download %s -> not_pdf", url)
-        return {**empty, "download_status": "not_pdf", "final_url": res.final_url}
-    try:
-        _write_atomic(dest, res.content)
-        _write_atomic(_meta_path(dest), json.dumps({"final_url": res.final_url, "url": url}).encode())
-    except OSError as e:
-        status = f"error:{type(e).__name__}"
-        log.info("download %s -> %s", url, status)
-        return {**empty, "download_status": status, "final_url": res.final_url}
-    log.info("download %s -> ok (%d bytes) %s", url, len(res.content), pdf_path)
-    return {
-        "download_status": "ok",
-        "final_url": res.final_url,
-        "sha256": _sha256(res.content),
-        "size_bytes": len(res.content),
-        "pdf_path": pdf_path,
-    }
+        out = _outcome(f"error:{type(e).__name__}")
+    else:
+        if not res.ok:
+            out = _outcome(f"http_{res.status}", res.final_url)
+        elif res.content[:5] != PDF_MAGIC:
+            out = _outcome("not_pdf", res.final_url)
+        else:
+            out = _outcome("ok", res.final_url, res.content, pdf_path)
+            try:
+                write_atomic(dest, res.content)
+            except OSError as e:
+                out = _outcome(f"error:{type(e).__name__}", res.final_url)
+    if out["download_status"] == "ok" or out["download_status"] in _PERMANENT_FAILURES:
+        _write_meta(dest, url, out)
+    log.info("download %s -> %s %s", url, out["download_status"], out["pdf_path"])
+    return out
 
 
 def download_documents(
@@ -131,15 +134,12 @@ def download_documents(
     taken: dict[tuple[str, str], str] = {}  # (folder, file name) -> url_normalized
     out: list[dict] = []
     for link in links:
-        row = dict(link)
-        if not _truthy(link.get("is_target")):
-            row.update({k: "" for k in _DOWNLOAD_FIELDS})
-            row["download_status"] = "skipped_not_target"
-            out.append(row)
+        if not link["is_target"]:
+            out.append({**link, **_outcome("skipped_not_target")})
             continue
-        url = link.get("url_normalized") or urls.normalize_url(link.get("url") or "")
+        url = link["url_normalized"]
         if url not in results:
-            folder = urls.slug_dir(link.get("dc_id") or "")
+            folder = urls.slug_dir(link["dc_id"])
             name = safe_basename(url)
             other = taken.get((folder, name))
             if other is not None and other != url:
@@ -147,15 +147,8 @@ def download_documents(
             taken[(folder, name)] = url
             dest = documents_dir / folder / f"{name}.pdf"
             results[url] = _download_one(fetcher, url, dest, _rel_posix(dest, base_dir), refresh)
-        row.update(results[url])
-        out.append(row)
+        out.append({**link, **results[url]})
     return out
-
-
-def _truthy(value) -> bool:
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "1", "yes"}
-    return bool(value)
 
 
 def _md_dest(pdf: Path, markdown_dir: Path, documents_dir: Path) -> Path:

@@ -2,20 +2,14 @@
 
 from __future__ import annotations
 
-import re
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 from .. import config, urls
+from ..util import clean_text
 
-_WS = re.compile(r"\s+")
 _SKIP_TAGS = {"h4", "time"}
-
-
-def _clean(text: str | None) -> str:
-    # \s also matches U+00A0 (&nbsp;) for str patterns.
-    return _WS.sub(" ", text or "").strip()
 
 
 def _body_nodes(li: Tag) -> list:
@@ -30,16 +24,16 @@ def _paragraphs(li: Tag) -> list[str]:
     for node in _body_nodes(li):
         if isinstance(node, NavigableString):
             if type(node) is NavigableString:  # skip comments, CDATA, etc.
-                out.append(_clean(str(node)))
+                out.append(clean_text(str(node)))
             continue
         if not isinstance(node, Tag):
             continue
         if node.name != "p":
             inner = node.find_all("p")
             if inner:
-                out.extend(_clean(p.get_text(" ", strip=True)) for p in inner)
+                out.extend(clean_text(p.get_text(" ", strip=True)) for p in inner)
                 continue
-        out.append(_clean(node.get_text(" ", strip=True)))
+        out.append(clean_text(node.get_text(" ", strip=True)))
     return [t for t in out if t]
 
 
@@ -84,7 +78,7 @@ def parse_procedural_history(
     links: list[dict] = []
     for seq, li in enumerate(reversed(items)):
         h4 = li.find("h4", recursive=False) or li.find("h4")
-        heading = _clean(h4.get_text(" ", strip=True)) if h4 else ""
+        heading = clean_text(h4.get_text(" ", strip=True)) if h4 else ""
         time_tag = li.find("time", recursive=False) or li.find("time", attrs={"datetime": True})
         entry_datetime = (time_tag.get("datetime") or "").strip() if time_tag else ""
         anchors = _links(li)
@@ -107,7 +101,7 @@ def parse_procedural_history(
                     "link_seq": link_seq,
                     "heading": heading,
                     "entry_datetime": entry_datetime,
-                    "link_text": _clean(a.get_text(" ", strip=True)),
+                    "link_text": clean_text(a.get_text(" ", strip=True)),
                     "url": href,
                     "url_normalized": urls.normalize_url(urljoin(base, href)),
                 }

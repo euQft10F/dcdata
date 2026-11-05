@@ -28,9 +28,9 @@ uv run dcdata all          # scrape DC + auctions, download PDFs, convert to Mar
 ```
 
 A cold run makes about 1,400 polite requests (1 s minimum gap per host) and takes roughly
-**70 minutes**. Responses are cached under `data/cache/` and PDFs under `data/documents/`, so
-re-runs only re-request links that failed earlier, mostly dead legacy links, and finish in about
-**5 minutes**.
+**70 minutes**. Responses are cached under `data/cache/` and PDFs under `data/documents/`, so a
+re-run makes no network requests at all and finishes in about **10 seconds**. Use `--refresh`
+to fetch everything again.
 
 A quick smoke test, using the first 5 credit events and no PDFs:
 
@@ -143,8 +143,11 @@ are downloaded by default. Some details matter here:
 - The DC site serves PDFs with `Content-Type: text/html`, so a file counts as a PDF only when its
   body starts with `%PDF-`. Anything else, such as `.xls` or `.docx` deliverable lists, is recorded
   as `not_pdf` and not saved.
-- Only 2xx responses are cached, so a failed fetch is retried on the next run. 4xx responses
-  are recorded, never raised.
+- Each PDF has a `.meta.json` sidecar that records the outcome (final URL, status, SHA-256,
+  size). Re-runs reuse the outcome without re-hashing or re-requesting anything. Permanent
+  failures (`http_404`, `http_410`, `not_pdf`) are remembered too. Transient failures (5xx,
+  timeouts) are not recorded and are retried on the next run. 4xx responses are recorded, never
+  raised.
 - Each file is converted with `pymupdf4llm.to_markdown`. Existing Markdown is reused unless
   `--refresh` is given.
 
@@ -168,8 +171,8 @@ Each auction is assigned to at most one DC event. The first stage that succeeds 
 
 Names are normalised before fuzzy scoring: lower-cased and accent-stripped, with punctuation and
 legal suffixes removed (Inc, S.A., plc, AG, N.V., GmbH, …). A fuzzy match is flagged
-`needs_review = true` when more than one candidate qualified, or when the runner-up scored within
-3 points.
+`needs_review = true` whenever more than one candidate qualified. The runner-up's id and score
+are written next to it.
 
 **Current result:** all 136 auctions match through a link-based method (133 `exact_link`,
 1 `normalized_link`, 2 `document_link`), so the fuzzy stage is currently a safety net for

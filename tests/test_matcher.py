@@ -2,14 +2,14 @@ import json
 import re
 from collections import Counter
 from datetime import UTC, datetime
-from pathlib import Path
 from urllib.parse import unquote_plus
 
 import pytest
+from conftest import FIXTURES
 
 from dcdata.config import Settings
 from dcdata.csvio import read_csv, write_csv
-from dcdata.match.evaluate import evaluate, evaluate_grid
+from dcdata.match.evaluate import evaluate_grid, format_table
 from dcdata.match.matcher import match_auctions
 from dcdata.match.pipeline import (
     build_joined,
@@ -26,7 +26,6 @@ from dcdata.schemas import (
 )
 from dcdata.urls import dc_id_from_url, normalize_dc_url, normalize_url
 
-FIXTURES = Path(__file__).parent / "fixtures"
 DC = "https://www.cdsdeterminationscommittees.org"
 
 # --------------------------------------------------------------------------------------------
@@ -188,7 +187,8 @@ def test_fixture_without_documents_falls_back_to_fuzzy(real):
 
 def test_fixture_evaluate(real):
     auctions, events, documents = real
-    n_truth, grid = evaluate_grid(auctions, events, documents)
+    matches = match_auctions(auctions, events, documents)
+    n_truth, grid = evaluate_grid(auctions, events, documents, matches)
     assert n_truth == 133
     cells = {(g["scorer"], g["threshold"]): g for g in grid}
     assert len(cells) == 30
@@ -196,7 +196,7 @@ def test_fixture_evaluate(real):
         assert g["correct"] + g["wrong"] + g["none"] == 133
     tsr = cells[("token_sort_ratio", 80)]
     assert tsr["correct"] >= 115 and tsr["wrong"] <= 12
-    table = evaluate(auctions, events, documents)
+    table = format_table(n_truth, grid)
     assert "token_sort_ratio" in table and "WRatio" in table
     print(table)
 

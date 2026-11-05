@@ -1,9 +1,9 @@
 import hashlib
 
 import httpx
-import pymupdf
 import pytest
 import respx
+from conftest import make_pdf
 
 from dcdata.dc.documents import convert_documents, download_documents, safe_basename
 from dcdata.http import Fetcher
@@ -184,18 +184,10 @@ def test_safe_basename(url, expected):
     assert safe_basename(url) == expected
 
 
-def _make_pdf(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    doc = pymupdf.open()
-    doc.new_page().insert_text((72, 72), text)
-    doc.save(str(path))
-    doc.close()
-
-
 def test_convert_documents(tmp_path):
     docs = tmp_path / "data" / "documents"
     mds = tmp_path / "data" / "markdown"
-    _make_pdf(docs / "cds_acme" / "acme-final-list.pdf", "Final List of Deliverable Obligations")
+    make_pdf(docs / "cds_acme" / "acme-final-list.pdf", "Final List of Deliverable Obligations")
     pdf_path = "data/documents/cds_acme/acme-final-list.pdf"
     rows = [
         {"dc_id": "cds/acme", "download_status": "ok", "pdf_path": pdf_path},
@@ -211,3 +203,30 @@ def test_convert_documents(tmp_path):
     assert out[3]["md_path"] == out[3]["md_status"] == ""
     assert "Final List of Deliverable Obligations" in (tmp_path / out[0]["md_path"]).read_text("utf-8")
     assert "md_path" not in rows[0]  # inputs untouched
+
+
+@respx.mock
+def test_permanent_failures_are_remembered(tmp_path):
+    url = "https://e.org/gone.pdf"
+    route = respx.get(url).mock(return_value=httpx.Response(404))
+    links = [link("cds/x", url)]
+    with Fetcher(delay=0, max_retries=0) as f:
+        first = download_documents(f, links, tmp_path, base_dir=tmp_path)
+        second = download_documents(f, links, tmp_path, base_dir=tmp_path)
+        assert route.call_count == 1  # the 404 is not re-requested
+        download_documents(f, links, tmp_path, base_dir=tmp_path, refresh=True)
+        assert route.call_count == 2  # --refresh retries it
+    assert first == second
+    assert first[0]["download_status"] == "http_404"
+
+
+@respx.mock
+def test_reuse_reads_sidecar_not_pdf(tmp_path):
+    url = "https://e.org/a.pdf"
+    respx.get(url).mock(return_value=httpx.Response(200, content=b"%PDF-1.4 body"))
+    links = [link("cds/x", url)]
+    with Fetcher(delay=0, max_retries=0) as f:
+        first = download_documents(f, links, tmp_path, base_dir=tmp_path)
+        second = download_documents(f, links, tmp_path, base_dir=tmp_path)
+    assert first == second
+    assert first[0]["download_status"] == "ok" and first[0]["size_bytes"] == 13

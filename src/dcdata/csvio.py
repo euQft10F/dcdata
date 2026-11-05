@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import csv
+import io
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+from .util import write_atomic
 
-def _fmt(value) -> str:
+
+def fmt_value(value) -> str:
+    """CSV cell text: None -> '', bools -> true/false, integral floats without '.0'."""
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -22,17 +26,14 @@ def write_csv(rows: Iterable[Mapping], path: Path | str, columns: Sequence[str])
     """Write rows (dicts) with exactly ``columns`` in that order. Extra keys are ignored,
     missing keys become empty strings. Rows are written in the order given (callers sort).
     Writes atomically. Returns the number of rows written."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".part")
+    buf = io.StringIO()
+    w = csv.writer(buf, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
+    w.writerow(columns)
     n = 0
-    with tmp.open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
-        w.writerow(columns)
-        for row in rows:
-            w.writerow([_fmt(row.get(c)) for c in columns])
-            n += 1
-    tmp.replace(path)
+    for row in rows:
+        w.writerow([fmt_value(row.get(c)) for c in columns])
+        n += 1
+    write_atomic(Path(path), buf.getvalue().encode("utf-8"))
     return n
 
 

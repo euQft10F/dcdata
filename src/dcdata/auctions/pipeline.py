@@ -34,14 +34,12 @@ def _strip(v) -> str:
 
 
 def _state_params(detail: dict | None) -> dict:
-    if not isinstance(detail, dict):
-        return {}
-    sp = detail.get("stateParams")
+    sp = (detail or {}).get("stateParams")
     return sp if isinstance(sp, dict) else {}
 
 
 def _has_final_price(sp: dict) -> bool:
-    return _value(sp.get(FINAL_PRICE)).strip() != ""
+    return _strip(sp.get(FINAL_PRICE)) != ""
 
 
 def _sort_key(row: dict) -> tuple[str, int]:
@@ -52,11 +50,12 @@ def run_auctions(settings: Settings, fetcher: Fetcher, years: list[int] | None =
     """Write settings.output_dir / 'auctions.csv'; return a summary dict of counts."""
     api = CreditFixingsAPI(fetcher, refresh=settings.refresh)
 
-    available = api.years()
-    wanted = sorted(set(available) & set(int(y) for y in years)) if years else sorted(set(available))
+    available = set(api.years())
+    wanted = sorted(available)
     if years:
-        missing = sorted(set(int(y) for y in years) - set(available))
-        if missing:
+        requested = {int(y) for y in years}
+        wanted = sorted(available & requested)
+        if missing := sorted(requested - available):
             log.warning("Requested years not offered by the API: %s", missing)
     log.info("Fetching auction lists for %d years: %s", len(wanted), wanted)
 
@@ -80,30 +79,30 @@ def run_auctions(settings: Settings, fetcher: Fetcher, years: list[int] | None =
 
     # One results call per distinct (raw) ticker; tickers may differ only by whitespace.
     tickers = sorted({a.get("ticker") or "" for a in auctions.values()})
-    results: dict[str, dict | None] = {}
+    results: dict[str, tuple[dict | None, int | None]] = {}
     for i, t in enumerate(tickers, 1):
         log.info("Results %d/%d: ticker %r", i, len(tickers), t)
-        results[t] = api.results_by_ticker(t) if t.strip() else None
+        results[t] = api.results_by_ticker(t) if t.strip() else (None, None)
 
     rows = []
     statuses: Counter[str] = Counter()
     for aid, a in auctions.items():
         ticker = a.get("ticker") or ""
-        res = results.get(ticker)
+        res, res_code = results[ticker]
         detail_map = (res or {}).get("auctionDetailsMap") or {}
         sp = _state_params(detail_map.get(str(aid)))
 
+        det_code = None
         if not _has_final_price(sp):
             log.info("Auction %s (%r): no final price in results, trying details", aid, ticker)
-            fallback = _state_params(api.details_by_id(aid))
+            detail, det_code = api.details_by_id(aid)
+            fallback = _state_params(detail)
             if _has_final_price(fallback) or not sp:
                 sp = fallback or sp
 
         if _has_final_price(sp):
             status = "ok"
         else:
-            res_code = api.status_of(api.results_url(ticker)) if ticker.strip() else None
-            det_code = api.status_of(api.details_url(aid))
             if res is None and res_code is not None and det_code is not None:
                 status = f"http_{res_code}"
             else:

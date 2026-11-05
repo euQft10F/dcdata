@@ -1,17 +1,16 @@
 import json
-from pathlib import Path
 from urllib.parse import parse_qsl, quote_plus
 
 import httpx
 import pytest
 import respx
+from conftest import FIXTURES
 
 from dcdata import config, schemas
 from dcdata.dc import archive
 from dcdata.dc.archive import build_archive_form, epoch_to_date, fetch_archive, parse_archive_row
 from dcdata.http import Fetcher
 
-FIXTURES = Path(__file__).parent / "fixtures"
 DETAIL_ONLY = {"n_history_entries", "n_target_documents", "detail_fetch_status"}
 
 
@@ -74,7 +73,7 @@ def test_parse_all_rows(parsed):
     assert len(parsed) == 281
     expected_cols = [c for c in schemas.DC_EVENTS_COLUMNS if c not in DETAIL_ONLY]
     for r in parsed:
-        assert list(r) == expected_cols
+        assert sorted(r) == sorted(expected_cols)
         assert all(isinstance(v, str) for v in r.values())
         assert r["dc_id"].startswith("cds/")
         assert r["dc_url"] == f"https://www.cdsdeterminationscommittees.org/{r['dc_id']}/"

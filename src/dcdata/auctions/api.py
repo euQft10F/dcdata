@@ -33,8 +33,6 @@ class CreditFixingsAPI:
     def __init__(self, fetcher: Fetcher, refresh: bool = False):
         self.fetcher = fetcher
         self.refresh = refresh
-        # url -> HTTP status of the last non-2xx response (results/details only).
-        self.last_status: dict[str, int] = {}
 
     def _get(self, path: str, cache_key: str):
         url = f"{config.CF_API}/{path}"
@@ -46,15 +44,14 @@ class CreditFixingsAPI:
             raise RuntimeError(f"HTTP {res.status} for {url}")
         return res.json()
 
-    def _get_optional(self, path: str, cache_key: str) -> dict | None:
+    def _get_optional(self, path: str, cache_key: str) -> tuple[dict | None, int | None]:
+        """``(data, None)`` on success, ``(None, http_status)`` on a non-2xx response."""
         url, res = self._get(path, cache_key)
         if not res.ok:
             log.warning("HTTP %s for %s", res.status, url)
-            self.last_status[url] = res.status
-            return None
-        self.last_status.pop(url, None)
+            return None, res.status
         data = res.json()
-        return data if isinstance(data, dict) else None
+        return (data if isinstance(data, dict) else None), None
 
     def years(self) -> list[int]:
         return [int(y) for y in self._get_required("auctions/years", "cf/years.json")]
@@ -63,23 +60,13 @@ class CreditFixingsAPI:
         year = int(year)
         return list(self._get_required(f"auctions/year/{year}", f"cf/year_{year}.json") or [])
 
-    def results_url(self, ticker: str) -> str:
-        return f"{config.CF_API}/auction-results/{quote(ticker, safe='')}"
-
-    def details_url(self, auction_id: int | str) -> str:
-        return f"{config.CF_API}/auction-details/{quote(str(auction_id), safe='')}"
-
-    def results_by_ticker(self, ticker: str) -> dict | None:
+    def results_by_ticker(self, ticker: str) -> tuple[dict | None, int | None]:
         return self._get_optional(
             f"auction-results/{quote(ticker, safe='')}", f"cf/results_{safe_key(ticker)}.json"
         )
 
-    def details_by_id(self, auction_id: int | str) -> dict | None:
+    def details_by_id(self, auction_id: int | str) -> tuple[dict | None, int | None]:
         return self._get_optional(
             f"auction-details/{quote(str(auction_id), safe='')}",
             f"cf/details_{safe_key(auction_id)}.json",
         )
-
-    def status_of(self, url: str) -> int | None:
-        """HTTP status of the last failed call to ``url`` (None if it succeeded / never ran)."""
-        return self.last_status.get(url)

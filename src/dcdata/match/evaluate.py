@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ..config import DATE_WINDOW_DAYS, FUZZY_SCORER, FUZZY_THRESHOLD
-from .matcher import _EventIndex, get_scorer, match_auctions, rank_candidates
+from ..config import DATE_WINDOW_DAYS
+from .matcher import _EventIndex, get_scorer, rank_candidates
 
 SCORERS = ("ratio", "token_sort_ratio", "token_set_ratio", "partial_ratio", "WRatio")
 THRESHOLDS = (95, 90, 85, 80, 75, 70)
@@ -13,31 +13,27 @@ def evaluate_grid(
     auctions: list[dict],
     events: list[dict],
     documents: list[dict],
+    matches: list[dict],
     date_window: tuple[int, int] = DATE_WINDOW_DAYS,
 ) -> tuple[int, list[dict]]:
-    """Return (n_ground_truth, rows) with keys scorer, threshold, correct, wrong, none."""
-    matched = match_auctions(
-        auctions, events, documents, scorer=FUZZY_SCORER, threshold=FUZZY_THRESHOLD, date_window=date_window
-    )
-    truth = {r["auction_id"]: r["dc_id"] for r in matched if r["match_method"] == "exact_link"}
-    gt_auctions = [a for a in auctions if a.get("auction_id") in truth]
+    """Score fuzzy-only matching against the ``exact_link`` rows of ``matches``.
+
+    Return (n_ground_truth, rows) with keys scorer, threshold, correct, wrong, none."""
+    truth = {r["auction_id"]: r["dc_id"] for r in matches if r["match_method"] == "exact_link"}
+    gt_auctions = [a for a in auctions if a["auction_id"] in truth]
     index = _EventIndex(events, documents)
     rows = []
     for name in SCORERS:
         scorer = get_scorer(name)
+        # Score once without a cutoff; each threshold's best candidate is the first one above it.
+        ranked = {a["auction_id"]: rank_candidates(a, index, scorer, None, date_window) for a in gt_auctions}
         for threshold in THRESHOLDS:
-            correct = wrong = none = 0
-            for a in gt_auctions:
-                ranked = rank_candidates(a, index, scorer, float(threshold), date_window)
-                if not ranked:
-                    none += 1
-                elif ranked[0].dc_id == truth[a["auction_id"]]:
-                    correct += 1
-                else:
-                    wrong += 1
-            rows.append(
-                {"scorer": name, "threshold": threshold, "correct": correct, "wrong": wrong, "none": none}
-            )
+            counts = {"correct": 0, "wrong": 0, "none": 0}
+            for aid, cands in ranked.items():
+                best = next((c for c in cands if c.score >= threshold), None)
+                key = "none" if best is None else "correct" if best.dc_id == truth[aid] else "wrong"
+                counts[key] += 1
+            rows.append({"scorer": name, "threshold": threshold, **counts})
     return len(gt_auctions), rows
 
 
@@ -50,9 +46,3 @@ def format_table(n_truth: int, rows: list[dict]) -> str:
     for r in rows:
         lines.append("  ".join(str(r[h]).ljust(w) for h, w in zip(header, widths, strict=True)))
     return "\n".join(lines)
-
-
-def evaluate(auctions: list[dict], events: list[dict], documents: list[dict]) -> str:
-    """Return a printable table of correct/wrong/none per scorer x threshold."""
-    n_truth, rows = evaluate_grid(auctions, events, documents)
-    return format_table(n_truth, rows)

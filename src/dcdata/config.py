@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DC_BASE = "https://www.cdsdeterminationscommittees.org"
-DC_ARCHIVE_PAGE_URL = f"{DC_BASE}/credit-default-swaps-archive/"
 DC_ARCHIVE_DATA_URL = f"{DC_BASE}/credit-default-swaps-archive/data/"
 DC_HOSTS = {"www.cdsdeterminationscommittees.org", "cdsdeterminationscommittees.org"}
 

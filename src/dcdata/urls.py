@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from . import config
 
@@ -49,9 +49,31 @@ def normalize_dc_url(url: str) -> str:
     return urlunsplit((scheme, host, path, "", ""))
 
 
+def dc_path_repaired(url: str) -> bool:
+    """True when normalize_dc_url had to drop a path prefix before '/cds/' (e.g. '/lcds/cds/...')."""
+    return urlsplit(quote_href(url)).path.rfind("/cds/") > 0
+
+
+def dc_url_key(url: str) -> str:
+    """Case-insensitive comparison key for DC detail-page URLs."""
+    return normalize_dc_url(url).lower()
+
+
+def doc_url_key(url: str) -> str:
+    """Comparison key for document URLs: normalize_url with a case- and trailing-slash-insensitive path."""
+    parts = urlsplit(normalize_url(url))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path.lower().rstrip("/"), parts.query, ""))
+
+
 def dc_id_from_url(url: str) -> str:
     """'https://www.cdsdeterminationscommittees.org/cds/foo-2/' -> 'cds/foo-2'."""
     return urlsplit(normalize_dc_url(url)).path.strip("/")
+
+
+def url_filename(url: str) -> str:
+    """Last non-empty path segment of ``url``, unquoted ('' if none)."""
+    segments = [s for s in urlsplit(url.strip()).path.split("/") if s]
+    return unquote(segments[-1]) if segments else ""
 
 
 def slug_dir(dc_id: str) -> str:
