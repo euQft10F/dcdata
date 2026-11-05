@@ -175,4 +175,11 @@ def test_nested_lists_and_skipped_links():
         (0, "Doc one", "/documents/x y.pdf/"),
         (1, "Nested", "https://e.org/n.pdf"),
     ]
-    assert links[0]["url_normalized"] == "/documents/x%20y.pdf/"
+    assert links[0]["url_normalized"] == "https://www.cdsdeterminationscommittees.org/documents/x%20y.pdf/"
+
+
+def test_relative_href_resolved_against_base_url():
+    html = '<ul class="ProceduralHistory"><li><h4>H</h4><p><a href="docs/a.pdf">A</a></p></li></ul>'
+    _, links = parse_procedural_history(html, "cds/x", base_url="https://example.org/cds/x/")
+    assert links[0]["url"] == "docs/a.pdf"
+    assert links[0]["url_normalized"] == "https://example.org/cds/x/docs/a.pdf"

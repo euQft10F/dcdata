@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
-from .. import urls
+from .. import config, urls
 
 _WS = re.compile(r"\s+")
 _SKIP_TAGS = {"h4", "time"}
@@ -57,15 +58,19 @@ def _links(li: Tag) -> list[Tag]:
     return found
 
 
-def parse_procedural_history(html: str, dc_id: str) -> tuple[list[dict], list[dict]] | None:
+def parse_procedural_history(
+    html: str, dc_id: str, base_url: str | None = None
+) -> tuple[list[dict], list[dict]] | None:
     """Parse ``ul.ProceduralHistory``.
 
     Returns ``None`` if the page has no Procedural History list, else ``(entries, links)``:
       entries: dicts with schemas.DC_HISTORY_COLUMNS
       links:   dicts with dc_id, entry_seq, link_seq, heading, entry_datetime, link_text, url,
-               url_normalized (= urls.normalize_url(url)).
+               url_normalized (= urls.normalize_url(url), with relative hrefs resolved against
+               ``base_url``, default the DC site root).
     entry_seq 0 = oldest (page order reversed).
     """
+    base = base_url or f"{config.DC_BASE}/{dc_id}/"
     soup = BeautifulSoup(html, "lxml")
     lists = soup.select("ul.ProceduralHistory")
     # Ignore any ProceduralHistory list nested inside another one; use the outermost (first) list.
@@ -104,7 +109,7 @@ def parse_procedural_history(html: str, dc_id: str) -> tuple[list[dict], list[di
                     "entry_datetime": entry_datetime,
                     "link_text": _clean(a.get_text(" ", strip=True)),
                     "url": href,
-                    "url_normalized": urls.normalize_url(href),
+                    "url_normalized": urls.normalize_url(urljoin(base, href)),
                 }
             )
     return entries, links

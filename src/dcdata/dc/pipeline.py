@@ -49,7 +49,7 @@ def run_dc(
             res = fetcher.get(
                 ev["dc_url"], cache_key=f"dc/pages/{slug_dir(dc_id)}.html", refresh=settings.refresh
             )
-            parsed = parse_procedural_history(res.text, dc_id) if res.ok else None
+            parsed = parse_procedural_history(res.text, dc_id, res.final_url) if res.ok else None
             ev["detail_fetch_status"] = _detail_status(res, parsed)
         except Exception as e:  # network failure after retries: record and continue
             log.warning("detail %s failed: %r", dc_id, e)
