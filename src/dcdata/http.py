@@ -88,7 +88,7 @@ class Fetcher:
     def post_form(
         self,
         url: str,
-        data: dict | list[tuple[str, str]],
+        data: dict[str, str],
         *,
         cache_key: str | None = None,
         refresh: bool = False,
