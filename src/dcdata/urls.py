@@ -1,4 +1,11 @@
-"""URL helpers shared by the DC scraper and the matcher."""
+"""URL helpers shared by the DC scraper and the matcher.
+
+Two kinds of function, not to be mixed up:
+
+* ``normalize_*`` produce the canonical URL that is *stored* (``dc_url``, ``url_normalized``).
+* ``*_key`` produce a lossy string used only to *compare* URLs (case, trailing slash, ``www.``
+  ignored); keys are never written to a CSV.
+"""
 
 from __future__ import annotations
 

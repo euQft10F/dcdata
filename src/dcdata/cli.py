@@ -18,15 +18,16 @@ from .http import Fetcher
 log = logging.getLogger("dcdata")
 
 
-def _csv_list(s: str) -> list[str]:
-    return [x.strip() for x in s.split(",") if x.strip()]
+def _csv_list(text: str) -> list[str]:
+    return [item.strip() for item in text.split(",") if item.strip()]
 
 
-def _years(s: str) -> list[int]:
-    return [int(x) for x in _csv_list(s)]
+def _years(text: str) -> list[int]:
+    return [int(item) for item in _csv_list(text)]
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Subcommands share ``common``; ``dc_opts`` apply to dc/all and ``au_opts`` to auctions/all."""
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--data-dir",
@@ -63,34 +64,37 @@ def build_parser() -> argparse.ArgumentParser:
         "--years", type=_years, default=None, help="comma-separated auction years (default: all)"
     )
 
-    p = argparse.ArgumentParser(prog="dcdata", description=__doc__)
-    p.add_argument("--version", action="version", version=f"dcdata {__version__}")
-    sub = p.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(prog="dcdata", description=__doc__)
+    parser.add_argument("--version", action="version", version=f"dcdata {__version__}")
+    sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("dc", parents=[common, dc_opts], help="scrape DC credit events, procedural history, PDFs")
     sub.add_parser("auctions", parents=[common, au_opts], help="scrape creditfixings.com CDS auction results")
     sub.add_parser("match", parents=[common], help="match auctions to DC credit events")
     sub.add_parser("all", parents=[common, dc_opts, au_opts], help="dc -> auctions -> match")
-    return p
+    return parser
 
 
 def _settings(args) -> Settings:
-    s = Settings(data_dir=args.data_dir, refresh=args.refresh, delay=args.delay)
-    if getattr(args, "doc_types", None):
-        s.target_doc_types = frozenset(args.doc_types)
-    return s
+    settings = Settings(data_dir=args.data_dir, refresh=args.refresh, delay=args.delay)
+    if getattr(args, "doc_types", None):  # only the dc / all subcommands have --doc-types
+        settings.target_doc_types = frozenset(args.doc_types)
+    return settings
 
 
 def _versions() -> dict:
-    out = {"python": platform.python_version(), "dcdata": __version__}
-    for pkg in ("httpx", "beautifulsoup4", "lxml", "pymupdf4llm", "pymupdf"):
+    """Python, dcdata and key library versions, for run_log.json."""
+    versions = {"python": platform.python_version(), "dcdata": __version__}
+    for package in ("httpx", "beautifulsoup4", "lxml", "pymupdf4llm", "pymupdf"):
         try:
-            out[pkg] = metadata.version(pkg)
+            versions[package] = metadata.version(package)
         except metadata.PackageNotFoundError:
             pass
-    return out
+    return versions
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the requested command(s) and write run_log.json. ``all`` runs dc, auctions, match in
+    that order: match reads the CSVs the first two write."""
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -110,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         "steps": {},
     }
 
+    # Each step is imported when it runs, so a command only loads the dependencies it needs.
     with Fetcher(cache_dir=settings.cache_dir, delay=settings.delay) as fetcher:
         if args.command in ("dc", "all"):
             from .dc.pipeline import run_dc

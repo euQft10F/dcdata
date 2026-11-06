@@ -1,4 +1,7 @@
-"""CSV column contracts (PLAN.md section 4). All writers use these lists verbatim."""
+"""CSV column contracts: column names and order of every output file.
+
+All writers pass these lists to ``csvio.write_csv`` verbatim, so the order here is the file order.
+"""
 
 DC_EVENTS_COLUMNS = [
     "dc_id",
@@ -31,6 +34,7 @@ DC_HISTORY_COLUMNS = [
     "n_links",
 ]
 
+# One row per hyperlink in a Procedural History entry (parsed and classified, before any download).
 DC_LINK_COLUMNS = [
     "dc_id",
     "entry_seq",
@@ -46,6 +50,7 @@ DC_LINK_COLUMNS = [
     "doc_date",
 ]
 
+# Added to each link row by the download (``documents.download_documents``) and Markdown steps.
 DC_DOWNLOAD_COLUMNS = [
     "download_status",
     "final_url",
@@ -78,6 +83,7 @@ AUCTIONS_COLUMNS = [
     "results_fetch_status",
 ]
 
+# Appended to the auction columns in matches.csv.
 MATCH_EXTRA_COLUMNS = [
     "dc_id",
     "dc_url",
@@ -107,6 +113,7 @@ JOINED_AUCTION_COLUMNS = [
     "needs_review",
 ]
 
+# credit_events_with_auctions.csv: all event columns, then one auction (if any), then per-event extras.
 JOINED_COLUMNS = DC_EVENTS_COLUMNS + JOINED_AUCTION_COLUMNS + ["latest_decision_date", "final_list_pdf_path"]
 
 MATCH_METHODS = ("exact_link", "normalized_link", "document_link", "unmatched")

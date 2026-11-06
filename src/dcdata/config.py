@@ -1,4 +1,6 @@
-"""Central configuration constants. Everything here can be overridden from the CLI."""
+"""Central constants (site URLs, request politeness, default document types) and ``Settings``.
+
+The CLI overrides only the data directory, refresh, request delay and document types, via Settings."""
 
 from __future__ import annotations
 

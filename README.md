@@ -160,10 +160,10 @@ Each auction is assigned to at most one DC event. The first stage that succeeds 
 
 | Method | Rule |
 |---|---|
-| `exact_link` | The auction's `isda_link` is the DC detail page, after scheme, case and trailing-slash normalisation |
+| `exact_link` | The auction's `isda_link` is a DC detail page, ignoring scheme, `www.`, case and trailing slash |
 | `normalized_link` | Same, after repairing malformed paths such as `/lcds/cds/<slug>` |
-| `document_link` | `isda_link` points to a PDF that appears in some event's Procedural History |
-| `unmatched` | No usable link |
+| `document_link` | `isda_link` is a document URL listed in `dc_documents.csv` (a link in some event's Procedural History) |
+| `unmatched` | `isda_link` is missing, or matches no known event page or document |
 
 Matching is by link only, with no name-based guessing. An auction whose `isda_link` is missing
 or points nowhere we know becomes `unmatched` and is left for you to review, rather than being
@@ -171,7 +171,9 @@ attached to a plausible-looking event.
 
 When several events link the same document, the pick is deterministic: *Question Decided*
 first, then the question submitted closest to the auction date, then `dc_id`. Such a match gets
-`needs_review = true`, and `runner_up_dc_id` names the next candidate.
+`needs_review = true`, and `runner_up_dc_id` names the next candidate. `n_candidates` is 1 for a
+detail-page match, the number of events sharing the document for a `document_link` match, and 0 for
+`unmatched`.
 
 **Current result:** all 136 auctions match (133 `exact_link`, 1 `normalized_link`,
 2 `document_link`), so nothing is `unmatched` today. A name-based fallback was built and tested
@@ -224,10 +226,13 @@ src/dcdata/
   urls.py           URL quoting / normalisation shared by scraper and matcher
   schemas.py        CSV column contracts
   pdfmd.py          PDF -> Markdown
-  dc/               archive.py, detail.py, classify.py, documents.py, pipeline.py
-  auctions/         api.py, pipeline.py
-  match/            matcher.py, pipeline.py
+  util.py           atomic file writes, whitespace cleaning
+  dc/               archive.py (archive list), detail.py (Procedural History), classify.py,
+                    documents.py (download + Markdown), pipeline.py
+  auctions/         api.py (creditfixings client), pipeline.py
+  match/            matcher.py (link-only matching, pure), pipeline.py (CSV I/O, joined output)
 ```
 
 The original design notes, including the site research and the work-package split, are in
-[`PLAN.md`](PLAN.md).
+[`PLAN.md`](PLAN.md). It is a historical document: it still describes the name-based fuzzy
+matching, `match_score` and `--evaluate`, which were removed, so this README is authoritative.

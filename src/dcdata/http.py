@@ -49,6 +49,12 @@ class FetchResult:
 
 
 class Fetcher:
+    """HTTP client with a per-host minimum gap between requests, retries on transient errors and an
+    optional disk cache.
+
+    ``cache_key`` (a path under ``cache_dir``) opts a request into the cache; only 2xx responses
+    are stored, and ``refresh=True`` skips the lookup. ``n_network_requests`` counts real requests."""
+
     def __init__(
         self,
         cache_dir: Path | None = None,
@@ -123,22 +129,25 @@ class Fetcher:
         body, meta = self._cache_paths(cache_key)
         if not (body.exists() and meta.exists()):
             return None
-        m = json.loads(meta.read_text(encoding="utf-8"))
+        cached_meta = json.loads(meta.read_text(encoding="utf-8"))
         return FetchResult(
-            status=m["status"],
-            final_url=m["final_url"],
+            status=cached_meta["status"],
+            final_url=cached_meta["final_url"],
             content=body.read_bytes(),
             from_cache=True,
         )
 
-    def _write_cache(self, cache_key: str, res: FetchResult) -> None:
+    def _write_cache(self, cache_key: str, result: FetchResult) -> None:
         if not self.cache_dir:
             return
         body, meta = self._cache_paths(cache_key)
-        write_atomic(body, res.content)
-        write_atomic(meta, json.dumps({"status": res.status, "final_url": res.final_url}, indent=2).encode())
+        write_atomic(body, result.content)
+        write_atomic(
+            meta, json.dumps({"status": result.status, "final_url": result.final_url}, indent=2).encode()
+        )
 
     def _throttle(self, url: str) -> None:
+        """Sleep until ``delay`` seconds have passed since the last request to the same host."""
         host = urlsplit(url).netloc.lower()
         last = self._last_request.get(host)
         if last is not None:
@@ -148,26 +157,31 @@ class Fetcher:
         self._last_request[host] = time.monotonic()
 
     def _send(self, method, url, data, headers) -> httpx.Response:
+        """One throttled network request; raises ``_RetryableStatus`` so tenacity retries 429/5xx."""
         self._throttle(url)
         self.n_network_requests += 1
         log.debug("%s %s", method, url)
-        resp = self.client.request(method, url, data=data, headers=headers)
-        if resp.status_code in RETRY_STATUSES:
-            raise _RetryableStatus(resp)
-        return resp
+        response = self.client.request(method, url, data=data, headers=headers)
+        if response.status_code in RETRY_STATUSES:
+            raise _RetryableStatus(response)
+        return response
 
-    def _fetch(self, method, url, *, data=None, cache_key=None, refresh=False, headers=None):
+    def _fetch(self, method, url, *, data=None, cache_key=None, refresh=False, headers=None) -> FetchResult:
+        """Cache lookup, else a retried network request. Never raises on HTTP error statuses
+        (including exhausted retries); transport errors still raise."""
         if cache_key and not refresh:
             cached = self._read_cache(cache_key)
             if cached is not None:
                 return cached
 
         try:
-            resp = self._retrying(self._send, method, url, data, headers)
+            response = self._retrying(self._send, method, url, data, headers)
         except _RetryableStatus as e:  # retries exhausted: report the status, do not raise
-            resp = e.response
-        res = FetchResult(status=resp.status_code, final_url=str(resp.url), content=resp.content)
+            response = e.response
+        result = FetchResult(
+            status=response.status_code, final_url=str(response.url), content=response.content
+        )
         # Only cache successful responses so transient failures are retried next run.
-        if cache_key and res.ok:
-            self._write_cache(cache_key, res)
-        return res
+        if cache_key and result.ok:
+            self._write_cache(cache_key, result)
+        return result

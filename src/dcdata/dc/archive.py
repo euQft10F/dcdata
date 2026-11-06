@@ -1,4 +1,4 @@
-"""DC archive list (DataTables JSON endpoint) fetching and row parsing. [Work package A]"""
+"""DC archive list (DataTables JSON endpoint) fetching and row parsing."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ _META_LABELS = {
 
 
 def build_archive_form(category: str, start: int, length: int) -> list[tuple[str, str]]:
-    """Full DataTables 1.9 form (PLAN.md 1.1). Column 2 filtered by ``category``."""
+    """Full DataTables 1.9 form the archive endpoint expects; column 2 (category) is filtered by ``category``."""
     form: list[tuple[str, str]] = [
         ("sEcho", "1"),
         ("iColumns", str(N_COLUMNS)),
@@ -69,16 +69,16 @@ def fetch_archive(fetcher: Fetcher, category: str = "credit-event", refresh: boo
         form = build_archive_form(category, start, PAGE_SIZE)
         # httpx's ``data=`` only accepts a mapping; the form keys are unique, so a dict keeps
         # every field (and, being insertion-ordered, the DataTables field order).
-        res = fetcher.post_form(
+        response = fetcher.post_form(
             config.DC_ARCHIVE_DATA_URL,
             dict(form),
             cache_key=f"dc/archive_{category}_{start}.json",
             refresh=refresh,
         )
-        if res.status != 200:
-            raise RuntimeError(f"DC archive request failed: HTTP {res.status} (start={start})")
+        if response.status != 200:
+            raise RuntimeError(f"DC archive request failed: HTTP {response.status} (start={start})")
         try:
-            payload = res.json()
+            payload = response.json()
         except ValueError as e:
             fetcher.invalidate(f"dc/archive_{category}_{start}.json")
             raise RuntimeError(f"DC archive returned a non-JSON body (start={start})") from e
@@ -112,7 +112,8 @@ def epoch_to_date(value) -> str:
         return ""
 
 
-def _text_date(text: str) -> str:
+def _parse_long_date(text: str) -> str:
+    """'March 5, 2012' -> '2012-03-05'; '' if the text is not in that format."""
     try:
         return datetime.strptime(clean_text(text), "%B %d, %Y").date().isoformat()
     except ValueError:
@@ -120,17 +121,21 @@ def _text_date(text: str) -> str:
 
 
 def _parse_date_updated(cell) -> str:
+    """Column 0 holds ``<long date text>' '<epoch>``; prefer the epoch, fall back to the text."""
     text, _, epoch = str(cell or "").partition("' '")
-    date = epoch_to_date(epoch)
-    text_date = _text_date(text)
-    if not date:
+    epoch_date = epoch_to_date(epoch)
+    text_date = _parse_long_date(text)
+    if not epoch_date:
         return text_date
-    if text_date and text_date != date:
-        log.debug("date_updated mismatch: text %s vs epoch %s", text_date, date)
-    return date
+    if text_date and text_date != epoch_date:
+        log.debug("date_updated mismatch: text %s vs epoch %s", text_date, epoch_date)
+    return epoch_date
 
 
 def _parse_html_block(block: str) -> dict:
+    """Fields embedded in the row's URL-encoded HTML cell (column 7): the detail-page link
+    (``dc_id``, ``dc_url``), question text, transaction type, the ``ceMeta_3`` list and the
+    submitter's further information."""
     soup = BeautifulSoup(unquote_plus(block or ""), "lxml")
     out = {
         "dc_id": "",
@@ -148,17 +153,17 @@ def _parse_html_block(block: str) -> dict:
     if title:
         out["question"] = _QUESTION_PREFIX.sub("", clean_text(title.get_text(" ", strip=True)))
 
-    tt = soup.select_one("p.ceMeta_2 strong")
-    if tt:
-        out["transaction_type"] = clean_text(tt.get_text(" ", strip=True))
+    transaction_type = soup.select_one("p.ceMeta_2 strong")
+    if transaction_type:
+        out["transaction_type"] = clean_text(transaction_type.get_text(" ", strip=True))
 
     for li in soup.select("ul.ceMeta_3 li"):
         em = li.find("em")
         if not em:
             continue
         label = clean_text(em.get_text(" ", strip=True)).rstrip(":").strip().lower()
-        col = _META_LABELS.get(label)
-        if not col:
+        column = _META_LABELS.get(label)
+        if not column:
             continue
         strong = li.find("strong")
         if strong:
@@ -166,7 +171,7 @@ def _parse_html_block(block: str) -> dict:
         else:
             full = clean_text(li.get_text(" ", strip=True))
             value = full[len(clean_text(em.get_text(" ", strip=True))) :]
-        out[col] = clean_text(value)
+        out[column] = clean_text(value)
 
     more = soup.select_one("a.more-link[href]")
     if more:
@@ -183,7 +188,10 @@ def _parse_html_block(block: str) -> dict:
 
 def parse_archive_row(row: list) -> dict:
     """One aaData row -> dict with DC_EVENTS_COLUMNS except n_history_entries, n_target_documents,
-    detail_fetch_status (filled by the pipeline)."""
+    detail_fetch_status (filled by the pipeline).
+
+    Row layout: 0 date_updated ('<text>' '<epoch>'), 1 committee_code, 2 category, 3 reference
+    entity, 4 submitted (epoch), 5 status, 6 outcome, 7 HTML block (see ``_parse_html_block``)."""
     cells = list(row) + [""] * (N_COLUMNS - len(row))
     html = _parse_html_block(str(cells[7] or ""))
     return {

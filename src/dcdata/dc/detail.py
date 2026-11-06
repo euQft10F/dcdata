@@ -1,4 +1,4 @@
-"""DC detail page: Procedural History parsing. [Work package A]"""
+"""DC detail page: Procedural History parsing."""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ def _paragraphs(li: Tag) -> list[str]:
 
 
 def _links(li: Tag) -> list[Tag]:
+    """Body anchors of an entry that point somewhere (no empty, '#fragment' or mailto: hrefs)."""
     found: list[Tag] = []
     for node in _body_nodes(li):
         if not isinstance(node, Tag):
@@ -64,19 +65,21 @@ def parse_procedural_history(
                ``base_url``, default the DC site root).
     entry_seq 0 = oldest (page order reversed).
     """
-    base = base_url or f"{config.DC_BASE}/{dc_id}/"
+    page_url = base_url or f"{config.DC_BASE}/{dc_id}/"  # relative hrefs resolve against this
     soup = BeautifulSoup(html, "lxml")
-    lists = soup.select("ul.ProceduralHistory")
     # Ignore any ProceduralHistory list nested inside another one; use the outermost (first) list.
-    outer = [u for u in lists if u.find_parent("ul", class_="ProceduralHistory") is None]
-    if not outer:
+    outer_lists = [
+        ul
+        for ul in soup.select("ul.ProceduralHistory")
+        if ul.find_parent("ul", class_="ProceduralHistory") is None
+    ]
+    if not outer_lists:
         return None
-    ul = outer[0]
 
-    items = ul.find_all("li", recursive=False)
+    items = outer_lists[0].find_all("li", recursive=False)
     entries: list[dict] = []
     links: list[dict] = []
-    for seq, li in enumerate(reversed(items)):
+    for seq, li in enumerate(reversed(items)):  # the page lists newest first; seq 0 = oldest
         h4 = li.find("h4", recursive=False) or li.find("h4")
         heading = clean_text(h4.get_text(" ", strip=True)) if h4 else ""
         time_tag = li.find("time", recursive=False) or li.find("time", attrs={"datetime": True})
@@ -103,7 +106,7 @@ def parse_procedural_history(
                     "entry_datetime": entry_datetime,
                     "link_text": clean_text(a.get_text(" ", strip=True)),
                     "url": href,
-                    "url_normalized": urls.normalize_url(urljoin(base, href)),
+                    "url_normalized": urls.normalize_url(urljoin(page_url, href)),
                 }
             )
     return entries, links

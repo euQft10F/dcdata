@@ -1,4 +1,4 @@
-"""PDF -> Markdown via pymupdf4llm. [Work package B]"""
+"""PDF -> Markdown via pymupdf4llm."""
 
 from __future__ import annotations
 
