@@ -63,30 +63,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--years", type=_years, default=None, help="comma-separated auction years (default: all)"
     )
 
-    m_opts = argparse.ArgumentParser(add_help=False)
-    m_opts.add_argument(
-        "--threshold",
-        type=float,
-        default=config.FUZZY_THRESHOLD,
-        help="fuzzy score cutoff 0-100 (default: 80)",
-    )
-    m_opts.add_argument(
-        "--scorer",
-        default=config.FUZZY_SCORER,
-        choices=config.FUZZY_SCORERS,
-        help="RapidFuzz scorer for the fuzzy fallback (default: token_sort_ratio)",
-    )
-    m_opts.add_argument(
-        "--evaluate", action="store_true", help="also print fuzzy-only accuracy vs. link-based ground truth"
-    )
-
     p = argparse.ArgumentParser(prog="dcdata", description=__doc__)
     p.add_argument("--version", action="version", version=f"dcdata {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("dc", parents=[common, dc_opts], help="scrape DC credit events, procedural history, PDFs")
     sub.add_parser("auctions", parents=[common, au_opts], help="scrape creditfixings.com CDS auction results")
-    sub.add_parser("match", parents=[common, m_opts], help="match auctions to DC credit events")
-    sub.add_parser("all", parents=[common, dc_opts, au_opts, m_opts], help="dc -> auctions -> match")
+    sub.add_parser("match", parents=[common], help="match auctions to DC credit events")
+    sub.add_parser("all", parents=[common, dc_opts, au_opts], help="dc -> auctions -> match")
     return p
 
 
@@ -94,15 +77,12 @@ def _settings(args) -> Settings:
     s = Settings(data_dir=args.data_dir, refresh=args.refresh, delay=args.delay)
     if getattr(args, "doc_types", None):
         s.target_doc_types = frozenset(args.doc_types)
-    if hasattr(args, "threshold"):
-        s.fuzzy_threshold = args.threshold
-        s.fuzzy_scorer = args.scorer
     return s
 
 
 def _versions() -> dict:
     out = {"python": platform.python_version(), "dcdata": __version__}
-    for pkg in ("httpx", "beautifulsoup4", "lxml", "rapidfuzz", "pymupdf4llm", "pymupdf"):
+    for pkg in ("httpx", "beautifulsoup4", "lxml", "pymupdf4llm", "pymupdf"):
         try:
             out[pkg] = metadata.version(pkg)
         except metadata.PackageNotFoundError:
@@ -148,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command in ("match", "all"):
             from .match.pipeline import run_match
 
-            run_log["steps"]["match"] = run_match(settings, evaluate=args.evaluate)
+            run_log["steps"]["match"] = run_match(settings)
         run_log["network_requests"] = fetcher.n_network_requests
 
     run_log["finished_at"] = datetime.now(UTC).isoformat(timespec="seconds")

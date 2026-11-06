@@ -23,11 +23,6 @@ TARGET_DOC_TYPES = frozenset(
     {"dc_decision", "final_list", "initial_list", "preliminary_list", "auction_terms"}
 )
 
-FUZZY_SCORERS = ("ratio", "token_sort_ratio", "token_set_ratio", "partial_ratio", "WRatio")
-FUZZY_SCORER = "token_sort_ratio"
-FUZZY_THRESHOLD = 80.0
-DATE_WINDOW_DAYS = (-7, 365)  # (auction_date - dc_submitted_date).days must fall inside this range
-
 DATA_DIR = Path("data")
 
 
@@ -39,9 +34,6 @@ class Settings:
     refresh: bool = False
     delay: float = REQUEST_DELAY_S
     target_doc_types: frozenset[str] = field(default_factory=lambda: TARGET_DOC_TYPES)
-    fuzzy_scorer: str = FUZZY_SCORER
-    fuzzy_threshold: float = FUZZY_THRESHOLD
-    date_window_days: tuple[int, int] = DATE_WINDOW_DAYS
 
     @property
     def cache_dir(self) -> Path:

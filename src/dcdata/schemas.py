@@ -86,10 +86,8 @@ MATCH_EXTRA_COLUMNS = [
     "dc_submitted_date",
     "dc_outcome",
     "match_method",
-    "match_score",
     "n_candidates",
     "runner_up_dc_id",
-    "runner_up_score",
     "needs_review",
 ]
 
@@ -106,10 +104,9 @@ JOINED_AUCTION_COLUMNS = [
     "final_price",
     "results_url",
     "match_method",
-    "match_score",
     "needs_review",
 ]
 
 JOINED_COLUMNS = DC_EVENTS_COLUMNS + JOINED_AUCTION_COLUMNS + ["latest_decision_date", "final_list_pdf_path"]
 
-MATCH_METHODS = ("exact_link", "normalized_link", "document_link", "fuzzy", "unmatched")
+MATCH_METHODS = ("exact_link", "normalized_link", "document_link", "unmatched")

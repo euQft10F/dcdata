@@ -9,7 +9,6 @@ from conftest import FIXTURES
 
 from dcdata.config import Settings
 from dcdata.csvio import read_csv, write_csv
-from dcdata.match.evaluate import evaluate_grid, format_table
 from dcdata.match.matcher import match_auctions
 from dcdata.match.pipeline import (
     build_joined,
@@ -173,32 +172,15 @@ def test_fixture_method_counts(real):
     assert by_id["9186"]["dc_id"] == "cds/liberty-interactive-llc"
     for r in rows:
         assert list(r) == MATCHES_COLUMNS
-        assert r["match_score"] == "100"
         assert r["needs_review"] == "false"
 
 
-def test_fixture_without_documents_falls_back_to_fuzzy(real):
+def test_fixture_without_documents_leaves_document_links_unmatched(real):
     auctions, events, _ = real
     rows = {r["auction_id"]: r for r in match_auctions(auctions, events, [])}
-    for aid, dc_id in (("9187", "cds/dish-dbs-corporation"), ("9186", "cds/liberty-interactive-llc")):
-        assert rows[aid]["match_method"] == "fuzzy"
-        assert rows[aid]["dc_id"] == dc_id
-
-
-def test_fixture_evaluate(real):
-    auctions, events, documents = real
-    matches = match_auctions(auctions, events, documents)
-    n_truth, grid = evaluate_grid(auctions, events, documents, matches)
-    assert n_truth == 133
-    cells = {(g["scorer"], g["threshold"]): g for g in grid}
-    assert len(cells) == 30
-    for g in grid:
-        assert g["correct"] + g["wrong"] + g["none"] == 133
-    tsr = cells[("token_sort_ratio", 80)]
-    assert tsr["correct"] >= 115 and tsr["wrong"] <= 12
-    table = format_table(n_truth, grid)
-    assert "token_sort_ratio" in table and "WRatio" in table
-    print(table)
+    for aid in ("9187", "9186"):
+        assert rows[aid]["match_method"] == "unmatched"
+        assert rows[aid]["dc_id"] == ""
 
 
 # --------------------------------------------------------------------------------------------
@@ -219,7 +201,6 @@ def test_exact_link_ignores_scheme_case_and_trailing_slash():
     assert row["dc_issue_number"] == "2020010101"
     assert row["dc_submitted_date"] == "2020-01-01"
     assert row["dc_outcome"] == "Question Decided"
-    assert row["match_score"] == "100"
     assert row["needs_review"] == "false"
 
 
@@ -231,15 +212,14 @@ def test_normalized_link_codere_style():
     (row,) = match_auctions(auctions, events, [])
     assert row["match_method"] == "normalized_link"
     assert row["dc_id"] == "cds/codere-finance-luxembourg-sa"
-    assert row["match_score"] == "100"
 
 
 def test_link_to_unknown_event_falls_through():
     events = [ev("cds/acme-corp", "Acme Corp", "2020-01-01")]
     auctions = [auc(1, "2020-02-01", "Acme Corporation", f"{DC}/cds/acme-corp-9/")]
     (row,) = match_auctions(auctions, events, [])
-    assert row["match_method"] == "fuzzy"
-    assert row["dc_id"] == "cds/acme-corp"
+    assert row["match_method"] == "unmatched"
+    assert row["dc_id"] == ""
 
 
 def test_document_link_pdf():
@@ -261,24 +241,26 @@ def test_document_link_pdf():
     (row,) = match_auctions(auctions, events, docs)
     assert row["match_method"] == "document_link"
     assert row["dc_id"] == "cds/dish-dbs-corporation"
-    assert row["match_score"] == "100"
     assert row["n_candidates"] == "1"
 
 
-def test_document_link_several_dc_ids_uses_fuzzy_ranking():
+def test_document_link_several_dc_ids_ranked_by_outcome_then_date_gap_then_id():
     pdf = f"{DC}/documents/2020/01/shared-list.pdf"
     events = [
-        ev("cds/alpha-inc", "Alpha Inc.", "2020-01-01"),
-        ev("cds/beta-plc", "Beta PLC", "2020-01-01"),
-        ev("cds/beta-plc-2", "Beta PLC", "2020-01-01"),  # not referencing the doc
+        ev("cds/a", "A", "2020-01-20", outcome="Rejected"),  # closest in time, but not decided
+        ev("cds/b", "B", "2019-06-01"),
+        ev("cds/c", "C", "2019-12-01"),  # decided and closer than b
+        ev("cds/d", "D", "2019-12-01"),  # identical to c: dc_id breaks the tie
+        ev("cds/e", "E", "2020-01-01"),  # does not link the document
     ]
-    docs = [doc_row("cds/alpha-inc", pdf), doc_row("cds/beta-plc", pdf)]
-    (row,) = match_auctions([auc(1, "2020-02-01", "Beta", pdf)], events, docs)
-    assert row["match_method"] == "document_link"
-    assert row["dc_id"] == "cds/beta-plc"
-    assert row["n_candidates"] == "2"
-    assert row["runner_up_dc_id"] == "cds/alpha-inc"
-    assert row["needs_review"] == "true"
+    docs = [doc_row(i, pdf) for i in ("cds/a", "cds/b", "cds/c", "cds/d")]
+    for evs in (events, events[::-1]):
+        (row,) = match_auctions([auc(1, "2020-02-01", "Whatever", pdf)], evs, docs)
+        assert row["match_method"] == "document_link"
+        assert row["dc_id"] == "cds/c"
+        assert row["n_candidates"] == "4"
+        assert row["runner_up_dc_id"] == "cds/d"
+        assert row["needs_review"] == "true"
 
 
 def test_document_link_ignores_documents_of_unknown_events():
@@ -288,89 +270,20 @@ def test_document_link_ignores_documents_of_unknown_events():
     assert row["match_method"] == "unmatched"
 
 
-def test_fuzzy_date_window_picks_right_event():
-    events = [
-        ev("cds/casino-guichard-perrachon-sa", "Casino Guichard-Perrachon S.A.", "2019-01-10"),
-        ev("cds/casino-guichard-perrachon-sa-2", "Casino Guichard-Perrachon S.A.", "2024-03-01"),
-    ]
-    auctions = [auc(1, "2024-04-10", "Casino Guichard Perrachon SA")]
-    (row,) = match_auctions(auctions, events, [])
-    assert row["match_method"] == "fuzzy"
-    assert row["dc_id"] == "cds/casino-guichard-perrachon-sa-2"
-    assert row["n_candidates"] == "1"
-    assert row["needs_review"] == "false"
-    assert row["match_score"] == "100"
-
-
-def test_fuzzy_window_bounds_inclusive():
-    events = [
-        ev("cds/a", "Acme", "2020-01-08"),  # gap -7 (allowed)
-    ]
-    (row,) = match_auctions([auc(1, "2020-01-01", "Acme")], events, [])
-    assert row["dc_id"] == "cds/a"
-    (row,) = match_auctions([auc(1, "2020-01-01", "Acme")], events, [], date_window=(-6, 365))
+def test_no_link_is_unmatched_even_with_identical_name():
+    events = [ev("cds/a", "Acme", "2020-01-01")]
+    (row,) = match_auctions([auc(1, "2020-01-15", "Acme")], events, [])
     assert row["match_method"] == "unmatched"
-
-
-def test_fuzzy_excludes_events_without_submitted_date():
-    (row,) = match_auctions([auc(1, "2020-01-01", "Acme")], [ev("cds/a", "Acme", "")], [])
-    assert row["match_method"] == "unmatched"
-    assert row["match_score"] == ""
-    assert row["dc_id"] == ""
-    assert row["n_candidates"] == "0"
-
-
-def test_fuzzy_prefers_decided_over_rejected():
-    events = [
-        ev("cds/acme", "Acme", "2020-01-20", outcome="Rejected"),  # closer in time
-        ev("cds/acme-2", "Acme", "2020-01-01", outcome="Question Decided"),
-    ]
-    (row,) = match_auctions([auc(1, "2020-01-25", "Acme")], events, [])
-    assert row["dc_id"] == "cds/acme-2"
-    assert row["n_candidates"] == "2"
-    assert row["runner_up_dc_id"] == "cds/acme"
-    assert row["runner_up_score"] == "100"
-    assert row["needs_review"] == "true"
-
-
-def test_fuzzy_closer_gap_wins_then_dc_id_tiebreak():
-    events = [
-        ev("cds/acme", "Acme", "2020-01-01"),
-        ev("cds/acme-2", "Acme", "2020-01-15"),
-    ]
-    (row,) = match_auctions([auc(1, "2020-01-20", "Acme")], events, [])
-    assert row["dc_id"] == "cds/acme-2"
-    # identical everything -> highest dc_id wins (descending tuple), independent of input order
-    events = [ev("cds/acme-b", "Acme", "2020-01-01"), ev("cds/acme-a", "Acme", "2020-01-01")]
-    for evs in (events, events[::-1]):
-        (row,) = match_auctions([auc(1, "2020-01-20", "Acme")], evs, [])
-        assert row["dc_id"] == "cds/acme-b"
-        assert row["runner_up_dc_id"] == "cds/acme-a"
-        assert row["needs_review"] == "true"
-
-
-def test_fuzzy_short_name_used_and_threshold():
-    events = [ev("cds/x", "Lehman Brothers Holdings Inc.", "2008-09-15")]
-    a = auc(1, "2008-10-10", "LBHI Something Unrelated", short="Lehman Brothers")
-    (row,) = match_auctions([a], events, [])
-    assert row["match_method"] == "fuzzy"
-    assert row["dc_id"] == "cds/x"
-    (row,) = match_auctions([auc(1, "2008-10-10", "Totally Other Name")], events, [])
-    assert row["match_method"] == "unmatched"
-
-
-def test_unknown_scorer_raises():
-    with pytest.raises(ValueError):
-        match_auctions([], [], [], scorer="nope")
+    assert row["dc_id"] == "" and row["n_candidates"] == "0" and row["needs_review"] == "false"
 
 
 def test_output_sort_order_and_columns():
     events = [ev("cds/a", "Alpha", "2020-01-01")]
     auctions = [
-        auc(10, "2020-03-01", "Alpha"),
-        auc(9, "2020-03-01", "Alpha"),
-        auc(100, "2020-02-01", "Alpha"),
-        auc(2, "2020-03-01", "Alpha"),
+        auc(10, "2020-03-01", "Alpha", f"{DC}/cds/a/"),
+        auc(9, "2020-03-01", "Alpha", f"{DC}/cds/a/"),
+        auc(100, "2020-02-01", "Alpha", f"{DC}/cds/a/"),
+        auc(2, "2020-03-01", "Alpha", f"{DC}/cds/a/"),
     ]
     rows = match_auctions(auctions, events, [])
     assert [r["auction_id"] for r in rows] == ["100", "2", "9", "10"]
@@ -447,7 +360,7 @@ def test_joined_includes_unmatched_events_once():
     assert joined[0]["match_method"] == "" and joined[0]["latest_decision_date"] == ""
 
 
-def test_run_match_writes_csvs(tmp_path, real, capsys):
+def test_run_match_writes_csvs(tmp_path, real):
     auctions, events, documents = real
     settings = Settings(data_dir=tmp_path)
     out = settings.output_dir
@@ -455,19 +368,16 @@ def test_run_match_writes_csvs(tmp_path, real, capsys):
     write_csv(events, out / "dc_credit_events.csv", DC_EVENTS_COLUMNS)
     write_csv(documents, out / "dc_documents.csv", DC_DOCUMENTS_COLUMNS)
 
-    summary = run_match(settings, evaluate=True)
+    summary = run_match(settings)
     assert summary["n_auctions"] == 136
     assert summary["methods"] == {
         "exact_link": 133,
         "normalized_link": 1,
         "document_link": 2,
-        "fuzzy": 0,
         "unmatched": 0,
     }
     assert summary["n_needs_review"] == 0
     assert summary["n_events"] == 281
-    assert "token_sort_ratio" in summary["evaluate"]
-    assert "token_sort_ratio" in capsys.readouterr().out
 
     matches_bytes = (out / "matches.csv").read_bytes()
     joined = read_csv(out / "credit_events_with_auctions.csv")

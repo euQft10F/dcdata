@@ -14,7 +14,7 @@ Each auction is then matched to the DC credit event that triggered it. Not every
 an auction; for example, a question can be decided "No" or settled without one.
 
 No LLMs and no browser automation are used. Everything is plain HTTP, HTML/JSON parsing and
-RapidFuzz. Given the same cache, every run produces byte-identical CSV files.
+URL matching. Given the same cache, every run produces byte-identical CSV files.
 
 ---
 
@@ -58,9 +58,6 @@ dcdata all       dc -> auctions -> match
 | `--no-markdown` | `dc`, `all` | Download PDFs but do not convert them |
 | `--doc-types a,b` | `dc`, `all` | Document types to download (default `dc_decision,final_list`) |
 | `--years 2023,2024` | `auctions`, `all` | Only these auction years (default: all years the API lists) |
-| `--threshold N` | `match`, `all` | Fuzzy score cutoff, 0–100 (default `80`) |
-| `--scorer NAME` | `match`, `all` | RapidFuzz scorer: `token_sort_ratio` (default), `ratio`, `partial_ratio`, `token_set_ratio`, `WRatio` |
-| `--evaluate` | `match`, `all` | Also print a fuzzy-only accuracy grid scored against the link-based matches |
 
 The available `--doc-types` are `dc_decision`, `final_list`, `initial_list`,
 `preliminary_list`, `auction_terms`, `bidders`, `auction_info`, `statement`, `redline`,
@@ -116,12 +113,12 @@ One row per hyperlink inside a history entry: `dc_id`, `entry_seq`, `link_seq`, 
 
 ### `matches.csv`
 All `auctions.csv` columns, followed by `dc_id`, `dc_url`, `dc_reference_entity`,
-`dc_issue_number`, `dc_submitted_date`, `dc_outcome`, `match_method`, `match_score`,
-`n_candidates`, `runner_up_dc_id`, `runner_up_score`, `needs_review`.
+`dc_issue_number`, `dc_submitted_date`, `dc_outcome`, `match_method`,
+`n_candidates`, `runner_up_dc_id`, `needs_review`.
 
 ### `credit_events_with_auctions.csv`
 All `dc_credit_events.csv` columns, followed by `auction_id`, `auction_date`, `legal_name`,
-`ticker`, `tier`, `ccy`, `final_price`, `results_url`, `match_method`, `match_score`,
+`ticker`, `tier`, `ccy`, `final_price`, `results_url`, `match_method`,
 `needs_review`, `latest_decision_date` and `final_list_pdf_path`. An event with no auction
 appears once, with the auction columns empty. An event with several auctions, for example
 senior and subordinated tiers, appears once per auction.
@@ -166,35 +163,29 @@ Each auction is assigned to at most one DC event. The first stage that succeeds 
 | `exact_link` | The auction's `isda_link` is the DC detail page, after scheme, case and trailing-slash normalisation |
 | `normalized_link` | Same, after repairing malformed paths such as `/lcds/cds/<slug>` |
 | `document_link` | `isda_link` points to a PDF that appears in some event's Procedural History |
-| `fuzzy` | Entity-name similarity ≥ threshold, and the auction falls between 7 days before and 365 days after the DC question was submitted. Candidates are ranked by (*Question Decided*, rounded score, −date gap, `dc_id`), so the result is deterministic |
-| `unmatched` | Nothing qualified |
+| `unmatched` | No usable link |
 
-Names are normalised before fuzzy scoring: lower-cased and accent-stripped, with punctuation and
-legal suffixes removed (Inc, S.A., plc, AG, N.V., GmbH, …). A `fuzzy` match is flagged
-`needs_review = true` whenever more than one candidate qualified. A `document_link` match is
-flagged when the same document appears under several events. The runner-up's id and score
-are written next to it.
+Matching is by link only, with no name-based guessing. An auction whose `isda_link` is missing
+or points nowhere we know becomes `unmatched` and is left for you to review, rather than being
+attached to a plausible-looking event.
 
-**Current result:** all 136 auctions match through a link-based method (133 `exact_link`,
-1 `normalized_link`, 2 `document_link`), so the fuzzy stage is currently a safety net for
-future data. `--evaluate` measures how well it would do alone. Every scorer reaches about 90 %
-correct at any threshold between 70 and 95, so the threshold matters little. The errors come
-from repeat defaulters such as *Hellenic Republic* or *Caesars* that have several plausible
-events in the date window:
+When several events link the same document, the pick is deterministic: *Question Decided*
+first, then the question submitted closest to the auction date, then `dc_id`. Such a match gets
+`needs_review = true`, and `runner_up_dc_id` names the next candidate.
 
-```
-scorer            threshold  correct  wrong  none
-token_sort_ratio  80         120      8      5      <- default
-ratio             80         121      8      4
-WRatio            90         122      8      3
-```
+**Current result:** all 136 auctions match (133 `exact_link`, 1 `normalized_link`,
+2 `document_link`), so nothing is `unmatched` today. A name-based fallback was built and tested
+earlier and then removed: on the 133 exact-link auctions it picked the right event about 90 % of
+the time, because repeat defaulters such as *Hellenic Republic* or *Caesars* have several
+plausible events. It is in the git history (before the "Remove fuzzy matching" commit) if future
+data ever needs it.
 
 ## Determinism
 
 - Stable sort keys for every CSV (for example `(submitted_date, dc_id)` and
   `(dc_id, entry_seq, link_seq)`), the stdlib `csv` writer, fixed column lists (`schemas.py`),
   LF line endings and atomic writes.
-- Fuzzy ties are broken by `dc_id`; no set or dict iteration order leaks into the output.
+- Ties between candidate events are broken by `dc_id`; no set or dict iteration order leaks into the output.
 - `run_log.json` is the only output that changes between identical runs, because it holds
   timestamps and the request count.
 - The upstream sites can change, of course. Delete `data/cache` or pass `--refresh` to pick up
@@ -235,7 +226,7 @@ src/dcdata/
   pdfmd.py          PDF -> Markdown
   dc/               archive.py, detail.py, classify.py, documents.py, pipeline.py
   auctions/         api.py, pipeline.py
-  match/            normalize.py, matcher.py, evaluate.py, pipeline.py
+  match/            matcher.py, pipeline.py
 ```
 
 The original design notes, including the site research and the work-package split, are in

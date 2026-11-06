@@ -16,7 +16,6 @@ from ..schemas import (
     MATCH_METHODS,
     MATCHES_COLUMNS,
 )
-from .evaluate import evaluate_grid, format_table
 from .matcher import match_auctions
 
 log = logging.getLogger(__name__)
@@ -121,21 +120,13 @@ def build_joined(events: list[dict], matches: list[dict], documents: list[dict])
     return rows
 
 
-def run_match(settings: Settings, evaluate: bool = False) -> dict:
+def run_match(settings: Settings) -> dict:
     out_dir = settings.output_dir
     auctions = _read_input(out_dir / AUCTIONS_CSV)
     events = _read_input(out_dir / EVENTS_CSV)
     documents = _read_input(out_dir / DOCUMENTS_CSV)
     log.info("match: %d auctions, %d DC events, %d DC documents", len(auctions), len(events), len(documents))
-    window = settings.date_window_days
-    matches = match_auctions(
-        auctions,
-        events,
-        documents,
-        scorer=settings.fuzzy_scorer,
-        threshold=settings.fuzzy_threshold,
-        date_window=window,
-    )
+    matches = match_auctions(auctions, events, documents)
     write_csv(matches, out_dir / MATCHES_CSV, MATCHES_COLUMNS)
     joined = build_joined(events, matches, documents)
     write_csv(joined, out_dir / JOINED_CSV, JOINED_COLUMNS)
@@ -159,10 +150,4 @@ def run_match(settings: Settings, evaluate: bool = False) -> dict:
         len(joined),
         summary["n_needs_review"],
     )
-    if evaluate:
-        n_truth, grid = evaluate_grid(auctions, events, documents, matches, date_window=window)
-        table = format_table(n_truth, grid)
-        print(table)
-        log.info("evaluation:\n%s", table)
-        summary["evaluate"] = table
     return summary
