@@ -77,7 +77,11 @@ def fetch_archive(fetcher: Fetcher, category: str = "credit-event", refresh: boo
         )
         if res.status != 200:
             raise RuntimeError(f"DC archive request failed: HTTP {res.status} (start={start})")
-        payload = res.json()
+        try:
+            payload = res.json()
+        except ValueError as e:
+            fetcher.invalidate(f"dc/archive_{category}_{start}.json")
+            raise RuntimeError(f"DC archive returned a non-JSON body (start={start})") from e
         page = payload.get("aaData") or []
         total = int(payload.get("iTotalDisplayRecords", 0) or 0)
         log.info("DC archive %s: start=%d got %d rows (total %d)", category, start, len(page), total)

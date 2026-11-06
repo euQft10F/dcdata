@@ -114,6 +114,7 @@ def test_api_headers_and_cache_keys(tmp_path):
         assert (tmp_path / "cf" / k).exists(), k
     assert safe_key(".ARGENT") == "%2EARGENT"
     assert safe_key("A/B:C") == "A%2FB%3AC"
+    assert safe_key("Monte").lower() != safe_key("MONTE").lower()  # case-insensitive file systems
 
 
 @respx.mock
@@ -231,3 +232,16 @@ def test_numeric_final_price_rendering(tmp_path):
     run_auctions(s, _fetcher(s), years=[2026])
     prices = {r["final_price"] for r in _rows(s) if r["ticker"] not in FIXTURE_RESULTS}
     assert prices == {"26.625"}
+
+
+@respx.mock
+def test_non_json_body_is_not_cached(tmp_path):
+    route = respx.get(f"{API}/auction-results/X").mock(
+        return_value=httpx.Response(200, content=b"<html>maintenance</html>")
+    )
+    api = CreditFixingsAPI(Fetcher(cache_dir=tmp_path, delay=0))
+    data, status = api.results_by_ticker("X")
+    assert data is None and status is not None
+    assert not (tmp_path / "cf" / "results_X.json").exists()
+    api.results_by_ticker("X")
+    assert route.call_count == 2

@@ -45,6 +45,10 @@ def run_dc(
     links: list[dict] = []
     for i, ev in enumerate(events, 1):
         dc_id = ev["dc_id"]
+        if not ev["dc_url"]:
+            log.warning("archive row %r has no detail link; skipping", ev["reference_entity"])
+            ev.update(detail_fetch_status="no_detail_url", n_history_entries=0, n_target_documents=0)
+            continue
         try:
             res = fetcher.get(
                 ev["dc_url"], cache_key=f"dc/pages/{slug_dir(dc_id)}.html", refresh=settings.refresh

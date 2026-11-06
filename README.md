@@ -94,7 +94,7 @@ and dates as ISO `YYYY-MM-DD`. Files are UTF-8 with `\n` line endings.
 `date_updated`, `submitted_date`, `status`, `outcome` (for example *Question Decided*,
 *Question Dismissed*), `question`, `transaction_type`, `issue_number`, `submitted_by`,
 `coverage_election`, `further_information`, `n_history_entries`, `n_target_documents`,
-`detail_fetch_status` (`ok`, `ok_no_history`, `http_<code>`, `error:<Type>`).
+`detail_fetch_status` (`ok`, `ok_no_history`, `no_detail_url`, `http_<code>`, `error:<Type>`).
 
 ### `dc_procedural_history.csv`
 `dc_id`, `entry_seq` (0 = **oldest** entry; the site lists newest first), `heading` (for example
@@ -144,10 +144,10 @@ are downloaded by default. Some details matter here:
   body starts with `%PDF-`. Anything else, such as `.xls` or `.docx` deliverable lists, is recorded
   as `not_pdf` and not saved.
 - Each PDF has a `.meta.json` sidecar that records the outcome (final URL, status, SHA-256,
-  size). Re-runs reuse the outcome without re-hashing or re-requesting anything. Permanent
-  failures (`http_404`, `http_410`, `not_pdf`) are remembered too. Transient failures (5xx,
-  timeouts) are not recorded and are retried on the next run. 4xx responses are recorded, never
-  raised.
+  size). Re-runs reuse the outcome without re-hashing or re-requesting anything. `http_404`
+  and `http_410` are remembered too. Everything else, including `not_pdf` (which might be a
+  temporary HTML maintenance page), is retried on the next run. 4xx responses are recorded,
+  never raised.
 - Each file is converted with `pymupdf4llm.to_markdown`. Existing Markdown is reused unless
   `--refresh` is given.
 
@@ -170,8 +170,9 @@ Each auction is assigned to at most one DC event. The first stage that succeeds 
 | `unmatched` | Nothing qualified |
 
 Names are normalised before fuzzy scoring: lower-cased and accent-stripped, with punctuation and
-legal suffixes removed (Inc, S.A., plc, AG, N.V., GmbH, …). A fuzzy match is flagged
-`needs_review = true` whenever more than one candidate qualified. The runner-up's id and score
+legal suffixes removed (Inc, S.A., plc, AG, N.V., GmbH, …). A `fuzzy` match is flagged
+`needs_review = true` whenever more than one candidate qualified. A `document_link` match is
+flagged when the same document appears under several events. The runner-up's id and score
 are written next to it.
 
 **Current result:** all 136 auctions match through a link-based method (133 `exact_link`,

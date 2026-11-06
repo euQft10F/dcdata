@@ -96,6 +96,12 @@ class Fetcher:
     ) -> FetchResult:
         return self._fetch("POST", url, data=data, cache_key=cache_key, refresh=refresh, headers=headers)
 
+    def invalidate(self, cache_key: str) -> None:
+        """Drop a cached response (e.g. a 200 whose body turned out to be unusable)."""
+        if self.cache_dir:
+            for path in self._cache_paths(cache_key):
+                path.unlink(missing_ok=True)
+
     def close(self) -> None:
         self.client.close()
 

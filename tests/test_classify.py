@@ -250,3 +250,8 @@ def test_annotate_link():
     stmt = annotate_link({**link, "link_text": "EMEA DC Statement 01032012"}, TARGET_DOC_TYPES)
     assert stmt["doc_type"] == "statement" and stmt["is_target"] is False
     assert stmt["doc_issue_number"] == ""
+
+
+def test_two_digit_years():
+    assert extract_doc_date("DC Decision 03/09/13", "") == "2013-03-09"
+    assert extract_doc_date("DC Decision 12/31/98", "") == "1998-12-31"

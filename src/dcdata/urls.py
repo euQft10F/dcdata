@@ -29,34 +29,44 @@ def normalize_url(url: str) -> str:
     return urlunsplit((scheme, host, parts.path, parts.query, ""))
 
 
-def normalize_dc_url(url: str) -> str:
-    """Canonical form of a DC detail-page URL.
-
-    lowercase scheme/host, http->https, keep www., take the path from the LAST '/cds/'
-    (repairs '/lcds/cds/...'), ensure a trailing slash, drop query and fragment.
-    """
+def _split_dc_url(url: str) -> tuple[str, bool]:
+    """``(canonical_url, repaired)`` -- see normalize_dc_url. ``repaired`` is True when a path
+    prefix before the last '/cds/' had to be dropped (e.g. '/lcds/cds/...')."""
     parts = urlsplit(quote_href(url))
     scheme = parts.scheme.lower() or "https"
     if scheme == "http":
         scheme = "https"
     host = parts.netloc.lower()
     path = parts.path
-    idx = path.rfind("/cds/")
+    idx = path.lower().rfind("/cds/")
     if idx >= 0:
         path = path[idx:]
     if not path.endswith("/"):
         path += "/"
-    return urlunsplit((scheme, host, path, "", ""))
+    return urlunsplit((scheme, host, path, "", "")), idx > 0
+
+
+def normalize_dc_url(url: str) -> str:
+    """Canonical form of a DC detail-page URL.
+
+    lowercase scheme/host, http->https, keep www., take the path from the LAST '/cds/'
+    (repairs '/lcds/cds/...'), ensure a trailing slash, drop query and fragment.
+    """
+    return _split_dc_url(url)[0]
 
 
 def dc_path_repaired(url: str) -> bool:
     """True when normalize_dc_url had to drop a path prefix before '/cds/' (e.g. '/lcds/cds/...')."""
-    return urlsplit(quote_href(url)).path.rfind("/cds/") > 0
+    return _split_dc_url(url)[1]
 
 
 def dc_url_key(url: str) -> str:
-    """Case-insensitive comparison key for DC detail-page URLs."""
-    return normalize_dc_url(url).lower()
+    """Comparison key for DC detail-page URLs: case-insensitive, and 'www.' is ignored on DC hosts."""
+    parts = urlsplit(normalize_dc_url(url).lower())
+    host = parts.netloc
+    if _is_dc_host(host) and host.startswith("www."):
+        host = host[4:]
+    return urlunsplit((parts.scheme, host, parts.path, "", ""))
 
 
 def doc_url_key(url: str) -> str:

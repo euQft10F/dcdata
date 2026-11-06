@@ -24,7 +24,8 @@ _MAX_BASENAME = 120
 # size). A rerun reuses it instead of re-hashing the PDF, and does not re-request links that failed
 # permanently (404/410/not_pdf), so reruns are fast and report byte-identical rows.
 _META_SUFFIX = ".meta.json"
-_PERMANENT_FAILURES = {"http_404", "http_410", "not_pdf"}
+# not_pdf is not listed: a 200 HTML page (maintenance, bot challenge) may be transient.
+_PERMANENT_FAILURES = {"http_404", "http_410"}
 
 _DOWNLOAD_FIELDS = tuple(c for c in schemas.DC_DOWNLOAD_COLUMNS if c not in ("md_path", "md_status"))
 
@@ -79,6 +80,8 @@ def _write_meta(dest: Path, url: str, out: dict) -> None:
 def _from_meta(dest: Path, url: str, pdf_path: str) -> dict | None:
     """Outcome recorded by an earlier run, or None if the link must be (re)fetched."""
     meta = _read_meta(dest)
+    if meta and meta.get("url") != url:  # the file name now belongs to a different URL
+        return None
     status = meta.get("download_status")
     if status in _PERMANENT_FAILURES:
         return _outcome(status, meta.get("final_url", ""))
@@ -141,10 +144,11 @@ def download_documents(
         if url not in results:
             folder = urls.slug_dir(link["dc_id"])
             name = safe_basename(url)
-            other = taken.get((folder, name))
+            # Compare names case-insensitively: Windows/macOS file systems do.
+            other = taken.get((folder, name.lower()))
             if other is not None and other != url:
                 name = f"{name}__{hashlib.sha1(url.encode('utf-8')).hexdigest()[:8]}"
-            taken[(folder, name)] = url
+            taken[(folder, name.lower())] = url
             dest = documents_dir / folder / f"{name}.pdf"
             results[url] = _download_one(fetcher, url, dest, _rel_posix(dest, base_dir), refresh)
         out.append({**link, **results[url]})

@@ -6,6 +6,7 @@ and are distinct from their unspaced namesake (``"MONTE"``), so they are never s
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from urllib.parse import quote
 
@@ -21,11 +22,20 @@ HEADERS = {
 }
 
 
+# Pseudo status for a 2xx response whose body is not JSON.
+NOT_JSON = 299
+
+
 def safe_key(value: str | int) -> str:
-    """Filesystem-safe, collision-free cache-key component (percent-encoding)."""
+    """Filesystem-safe, collision-free cache-key component (percent-encoding).
+
+    Keys with lowercase letters get a hash suffix so they cannot collide with an upper-case
+    namesake on case-insensitive file systems (Windows, macOS)."""
     s = quote(str(value), safe="")
     if s.startswith("."):  # avoid ".", ".." and hidden files
         s = "%2E" + s[1:]
+    if s != s.upper():
+        s += "~" + hashlib.sha1(str(value).encode("utf-8")).hexdigest()[:8]
     return s
 
 
@@ -35,22 +45,30 @@ class CreditFixingsAPI:
         self.refresh = refresh
 
     def _get(self, path: str, cache_key: str):
+        """``(url, status, data)``; data is None unless the response is 2xx with a JSON body.
+        A 2xx non-JSON body (e.g. a maintenance page) is evicted from the cache."""
         url = f"{config.CF_API}/{path}"
-        return url, self.fetcher.get(url, cache_key=cache_key, refresh=self.refresh, headers=HEADERS)
+        res = self.fetcher.get(url, cache_key=cache_key, refresh=self.refresh, headers=HEADERS)
+        if not res.ok:
+            return url, res.status, None
+        try:
+            return url, res.status, res.json()
+        except ValueError:
+            self.fetcher.invalidate(cache_key)
+            return url, NOT_JSON, None
 
     def _get_required(self, path: str, cache_key: str):
-        url, res = self._get(path, cache_key)
-        if not res.ok:
-            raise RuntimeError(f"HTTP {res.status} for {url}")
-        return res.json()
+        url, status, data = self._get(path, cache_key)
+        if data is None:
+            raise RuntimeError(f"HTTP {status} (or non-JSON body) for {url}")
+        return data
 
     def _get_optional(self, path: str, cache_key: str) -> tuple[dict | None, int | None]:
-        """``(data, None)`` on success, ``(None, http_status)`` on a non-2xx response."""
-        url, res = self._get(path, cache_key)
-        if not res.ok:
-            log.warning("HTTP %s for %s", res.status, url)
-            return None, res.status
-        data = res.json()
+        """``(data, None)`` on success, ``(None, status)`` on a non-2xx or non-JSON response."""
+        url, status, data = self._get(path, cache_key)
+        if data is None:
+            log.warning("HTTP %s (or non-JSON body) for %s", status, url)
+            return None, status
         return (data if isinstance(data, dict) else None), None
 
     def years(self) -> list[int]:

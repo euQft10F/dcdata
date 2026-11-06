@@ -23,6 +23,7 @@ TARGET_DOC_TYPES = frozenset(
     {"dc_decision", "final_list", "initial_list", "preliminary_list", "auction_terms"}
 )
 
+FUZZY_SCORERS = ("ratio", "token_sort_ratio", "token_set_ratio", "partial_ratio", "WRatio")
 FUZZY_SCORER = "token_sort_ratio"
 FUZZY_THRESHOLD = 80.0
 DATE_WINDOW_DAYS = (-7, 365)  # (auction_date - dc_submitted_date).days must fall inside this range

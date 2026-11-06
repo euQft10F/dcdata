@@ -196,6 +196,8 @@ def match_one(
             row["match_method"] = "document_link"
             row["match_score"] = "100"
             _fill_ranked(row, ranked)
+            # Several events link the same document: the pick is a name-based tie-break, review it.
+            row["needs_review"] = "true" if len(ranked) > 1 else "false"
             return row
 
     # 4. fuzzy

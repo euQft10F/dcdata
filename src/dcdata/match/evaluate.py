@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from ..config import DATE_WINDOW_DAYS
+from ..config import DATE_WINDOW_DAYS, FUZZY_SCORERS
 from .matcher import _EventIndex, get_scorer, rank_candidates
 
-SCORERS = ("ratio", "token_sort_ratio", "token_set_ratio", "partial_ratio", "WRatio")
 THRESHOLDS = (95, 90, 85, 80, 75, 70)
 
 
@@ -23,7 +22,7 @@ def evaluate_grid(
     gt_auctions = [a for a in auctions if a["auction_id"] in truth]
     index = _EventIndex(events, documents)
     rows = []
-    for name in SCORERS:
+    for name in FUZZY_SCORERS:
         scorer = get_scorer(name)
         # Score once without a cutoff; each threshold's best candidate is the first one above it.
         ranked = {a["auction_id"]: rank_candidates(a, index, scorer, None, date_window) for a in gt_auctions}

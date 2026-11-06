@@ -278,6 +278,7 @@ def test_document_link_several_dc_ids_uses_fuzzy_ranking():
     assert row["dc_id"] == "cds/beta-plc"
     assert row["n_candidates"] == "2"
     assert row["runner_up_dc_id"] == "cds/alpha-inc"
+    assert row["needs_review"] == "true"
 
 
 def test_document_link_ignores_documents_of_unknown_events():
@@ -485,3 +486,12 @@ def test_run_match_writes_csvs(tmp_path, real, capsys):
 def test_run_match_missing_input(tmp_path):
     with pytest.raises(FileNotFoundError, match="dcdata auctions"):
         run_match(Settings(data_dir=tmp_path))
+
+
+def test_exact_link_ignores_www_prefix():
+    events = [ev("cds/foo", "Foo Inc.", "2020-01-01")]
+    (row,) = match_auctions(
+        [auc(1, "2020-02-01", "Foo", "https://cdsdeterminationscommittees.org/CDS/foo")], events, []
+    )
+    assert row["match_method"] == "exact_link"
+    assert row["dc_id"] == "cds/foo"

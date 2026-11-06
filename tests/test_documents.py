@@ -230,3 +230,26 @@ def test_reuse_reads_sidecar_not_pdf(tmp_path):
         second = download_documents(f, links, tmp_path, base_dir=tmp_path)
     assert first == second
     assert first[0]["download_status"] == "ok" and first[0]["size_bytes"] == 13
+
+
+@respx.mock
+def test_sidecar_for_another_url_is_not_reused(tmp_path):
+    a, b = "https://e.org/x/decision.pdf", "https://e.org/y/decision.pdf"
+    respx.get(a).mock(return_value=httpx.Response(200, content=b"%PDF-1.4 AAAA"))
+    respx.get(b).mock(return_value=httpx.Response(200, content=b"%PDF-1.4 BBBB"))
+    with Fetcher(delay=0, max_retries=0) as f:
+        first = download_documents(f, [link("cds/x", a)], tmp_path, base_dir=tmp_path)
+        second = download_documents(f, [link("cds/x", b)], tmp_path, base_dir=tmp_path)
+    assert first[0]["pdf_path"] == second[0]["pdf_path"]  # same file name
+    assert first[0]["sha256"] != second[0]["sha256"]  # but B was downloaded, not A reused
+    assert second[0]["final_url"] == b
+
+
+@respx.mock
+def test_case_only_name_collision_gets_suffix(tmp_path):
+    a, b = "https://e.org/Decision.pdf", "https://e.org/decision.pdf"
+    respx.get(a).mock(return_value=httpx.Response(200, content=b"%PDF-1.4 AAAA"))
+    respx.get(b).mock(return_value=httpx.Response(200, content=b"%PDF-1.4 BBBB"))
+    with Fetcher(delay=0, max_retries=0) as f:
+        rows = download_documents(f, [link("cds/x", a), link("cds/x", b)], tmp_path, base_dir=tmp_path)
+    assert rows[0]["pdf_path"].lower() != rows[1]["pdf_path"].lower()

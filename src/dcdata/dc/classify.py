@@ -178,8 +178,8 @@ def _compact_dates(s: str) -> date | None:
 def _text_date(text: str) -> date | None:
     for m in _US_NUMERIC_RE.finditer(text):
         year = int(m.group(3))
-        if year < 100:
-            year += 2000
+        if year < 100:  # DC decisions start in 2009; '98' is 1998, not 2098
+            year += 2000 if year < 90 else 1900
         d = _mkdate(year, int(m.group(1)), int(m.group(2)))
         if d:
             return d

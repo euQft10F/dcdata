@@ -1,4 +1,12 @@
-from dcdata.urls import dc_id_from_url, normalize_dc_url, normalize_url, quote_href, slug_dir
+from dcdata.urls import (
+    dc_id_from_url,
+    dc_path_repaired,
+    dc_url_key,
+    normalize_dc_url,
+    normalize_url,
+    quote_href,
+    slug_dir,
+)
 
 
 def test_quote_href_spaces_and_existing_escapes():
@@ -34,3 +42,11 @@ def test_normalize_url_http_to_https_only_for_dc():
         "https://www.cdsdeterminationscommittees.org/docs/a%20b.pdf"
     )
     assert normalize_url("http://www.isda.org/dc/docs/X.pdf") == "http://www.isda.org/dc/docs/X.pdf"
+
+
+def test_dc_url_key_and_repair_flag():
+    canon = "https://www.cdsdeterminationscommittees.org/cds/foo/"
+    assert dc_url_key("http://cdsdeterminationscommittees.org/CDS/Foo") == dc_url_key(canon)
+    assert not dc_path_repaired(canon)
+    assert dc_path_repaired("https://www.cdsdeterminationscommittees.org/lcds/cds/foo/")
+    assert dc_path_repaired("https://www.cdsdeterminationscommittees.org/LCDS/CDS/foo/")
