@@ -32,7 +32,6 @@ dev = [
 [tool.ruff]
 line-length = 110
 target-version = "py311"
-extend-exclude = ["PLAN.md"]  # historical design notes; not code
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]

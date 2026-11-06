@@ -232,7 +232,3 @@ src/dcdata/
   auctions/         api.py (creditfixings client), pipeline.py
   match/            matcher.py (link-only matching, pure), pipeline.py (CSV I/O, joined output)
 ```
-
-The original design notes, including the site research and the work-package split, are in
-[`PLAN.md`](PLAN.md). It is a historical document: it still describes the name-based fuzzy
-matching, `match_score` and `--evaluate`, which were removed, so this README is authoritative.
