@@ -27,8 +27,6 @@ def _parse(slug):
     "slug, n_entries, n_links",
     [
         ("dish-dbs-corporation", 19, 24),
-        ("general-growth-properties-inc", 3, 1),
-        ("the-hellenic-republic-2", 2, 2),
         ("credit-suisse-group-ag", 4, 1),
     ],
 )

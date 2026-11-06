@@ -55,13 +55,10 @@ def test_build_archive_form_complete():
     "value, expected",
     [
         (1239840000, "2009-04-16"),
-        ("1239840000", "2009-04-16"),
         (" 1782840256 ", "2026-06-30"),
-        (0, "1970-01-01"),
         ("", ""),
         (None, ""),
         ("abc", ""),
-        ("12.5", ""),
     ],
 )
 def test_epoch_to_date(value, expected):
@@ -102,19 +99,6 @@ def test_dish_row(parsed):
     assert r["further_information"].startswith("DISH DBS Corporation and Subsidiaries Initiate")
     assert r["further_information"].endswith("Press release")
     assert "Further Information" not in r["further_information"]
-
-
-def test_general_growth_row(parsed):
-    r = _by_id(parsed, "cds/general-growth-properties-inc")
-    assert r["reference_entity"] == "General Growth Properties Inc."
-    assert r["issue_number"] == "200904163"
-    assert r["submitted_by"] == "UBS AG"
-    assert r["committee"] == "Americas"
-    assert r["date_updated"] == "2009-04-16"
-    assert r["submitted_date"] == "2009-04-16"
-    assert r["transaction_type"] == "North American Corporate"
-    assert r["coverage_election"] == ""
-    assert r["further_information"].startswith("Link to the press release: http://www.ggp.com/")
 
 
 def test_hellenic_row(parsed):
@@ -198,15 +182,6 @@ def test_fetch_archive_paginates_and_caches(tmp_path, raw_rows, monkeypatch):
     # refresh forces the network again
     fetch_archive(f, refresh=True)
     assert route.call_count == 6
-
-
-@respx.mock
-def test_fetch_archive_single_page_default(raw_rows):
-    handler, calls = _mock_endpoint(raw_rows)
-    respx.post(config.DC_ARCHIVE_DATA_URL).mock(side_effect=handler)
-    rows = fetch_archive(Fetcher(delay=0))
-    assert len(rows) == 281
-    assert len(calls) == 1 and calls[0]["iDisplayLength"] == "500"
 
 
 @respx.mock

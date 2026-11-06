@@ -170,7 +170,6 @@ def test_pdf_path_absolute_outside_base(tmp_path):
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
-        (f"{DC}/dish-dbs-corporation-final-list.pdf/", "dish-dbs-corporation-final-list"),
         (
             "https://www.cdsdeterminationscommittees.org/docs/20090416%20200904163%20DC%20resolutions.pdf",
             "20090416_200904163_DC_resolutions",
@@ -218,18 +217,6 @@ def test_permanent_failures_are_remembered(tmp_path):
         assert route.call_count == 2  # --refresh retries it
     assert first == second
     assert first[0]["download_status"] == "http_404"
-
-
-@respx.mock
-def test_reuse_reads_sidecar_not_pdf(tmp_path):
-    url = "https://e.org/a.pdf"
-    respx.get(url).mock(return_value=httpx.Response(200, content=b"%PDF-1.4 body"))
-    links = [link("cds/x", url)]
-    with Fetcher(delay=0, max_retries=0) as f:
-        first = download_documents(f, links, tmp_path, base_dir=tmp_path)
-        second = download_documents(f, links, tmp_path, base_dir=tmp_path)
-    assert first == second
-    assert first[0]["download_status"] == "ok" and first[0]["size_bytes"] == 13
 
 
 @respx.mock

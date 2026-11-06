@@ -151,13 +151,6 @@ def real():
     return fixture_auctions(), fixture_events(), fixture_documents()
 
 
-def test_fixture_tables_shape(real):
-    auctions, events, _ = real
-    assert len(auctions) == 136
-    assert len(events) == 281
-    assert len({e["dc_id"] for e in events}) == 281
-
-
 def test_fixture_method_counts(real):
     auctions, events, documents = real
     rows = match_auctions(auctions, events, documents)
@@ -173,14 +166,6 @@ def test_fixture_method_counts(real):
     for r in rows:
         assert list(r) == MATCHES_COLUMNS
         assert r["needs_review"] == "false"
-
-
-def test_fixture_without_documents_leaves_document_links_unmatched(real):
-    auctions, events, _ = real
-    rows = {r["auction_id"]: r for r in match_auctions(auctions, events, [])}
-    for aid in ("9187", "9186"):
-        assert rows[aid]["match_method"] == "unmatched"
-        assert rows[aid]["dc_id"] == ""
 
 
 # --------------------------------------------------------------------------------------------

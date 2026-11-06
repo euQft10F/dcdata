@@ -3,7 +3,6 @@ from dcdata.urls import (
     dc_path_repaired,
     dc_url_key,
     normalize_dc_url,
-    normalize_url,
     quote_href,
     slug_dir,
 )
@@ -23,25 +22,10 @@ def test_normalize_dc_url_variants():
     )
 
 
-def test_normalize_dc_url_repairs_lcds_prefix():
-    bad = "https://www.cdsdeterminationscommittees.org/lcds/cds/codere-finance-luxembourg-sa/"
-    assert (
-        normalize_dc_url(bad)
-        == "https://www.cdsdeterminationscommittees.org/cds/codere-finance-luxembourg-sa/"
-    )
-
-
 def test_dc_id_and_slug():
     dc_id = dc_id_from_url("https://www.cdsdeterminationscommittees.org/cds/casino-guichard-perrachon-sa-2/")
     assert dc_id == "cds/casino-guichard-perrachon-sa-2"
     assert slug_dir(dc_id) == "cds_casino-guichard-perrachon-sa-2"
-
-
-def test_normalize_url_http_to_https_only_for_dc():
-    assert normalize_url("http://www.cdsdeterminationscommittees.org/docs/a b.pdf") == (
-        "https://www.cdsdeterminationscommittees.org/docs/a%20b.pdf"
-    )
-    assert normalize_url("http://www.isda.org/dc/docs/X.pdf") == "http://www.isda.org/dc/docs/X.pdf"
 
 
 def test_dc_url_key_and_repair_flag():

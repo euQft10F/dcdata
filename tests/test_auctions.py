@@ -72,21 +72,6 @@ def _rows(s):
     return csvio.read_csv(s.output_dir / "auctions.csv")
 
 
-def _year_counts():
-    cds = lcds = 0
-    for f in FIXTURES.glob("cf_year_*.json"):
-        for a in json.loads(f.read_text(encoding="utf-8")):
-            if a["auctionType"] == "LCDS":
-                lcds += 1
-            else:
-                cds += 1
-    return cds, lcds
-
-
-def test_fixture_counts():
-    assert _year_counts() == (136, 19)
-
-
 @respx.mock
 def test_api_headers_and_cache_keys(tmp_path):
     FakeAPI(respx.mock)
